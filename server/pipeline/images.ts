@@ -22,6 +22,8 @@ const TARGET_PER_PLACE = 3;
 const MAX_PER_PLACE = 5;
 /** Resolve at most this many (top-ranked) places per guide, to stay fast. */
 const MAX_RESOLVE = 400;
+/** Extra Wikipedia *searches* for still-missing top places (one request each). */
+const SEARCH_CAP = 60;
 /** Parallelism for the per-category Commons calls (kept low to avoid throttling). */
 const CONCURRENCY = 4;
 
@@ -46,6 +48,55 @@ function chunk<T>(arr: T[], size: number): T[][] {
 
 function normName(s: string): string {
   return s.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+// Generic words that don't identify a specific place (used to find the
+// "distinctive" part of a name when verifying a fuzzy search match).
+const GENERIC_WORDS = new Set([
+  'silver', 'gold', 'mine', 'mines', 'temple', 'shrine', 'museum', 'park',
+  'garden', 'gardens', 'hall', 'castle', 'onsen', 'hot', 'spring', 'springs',
+  'city', 'town', 'village', 'prefecture', 'former', 'old', 'great', 'grand',
+  'national', 'historic', 'historical', 'site', 'ruins', 'station', 'river',
+  'mountain', 'mount', 'lake', 'falls', 'waterfall', 'house', 'center',
+  'centre', 'memorial', 'art', 'history', 'the', 'of', 'and',
+]);
+
+/** Lowercase, strip diacritics/parentheticals, keep alnum tokens. */
+function foldTokens(s: string): string[] {
+  return s
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .split(' ')
+    .filter((t) => t.length >= 3);
+}
+
+/**
+ * True when `title` is confidently the same place as `name`: every *distinctive*
+ * token of the name appears in the title (so "Yamagata (city)" is NOT accepted
+ * for "Bunshōkan", but "Chidōkan (Tsuruoka)" is accepted for "Chidokan").
+ */
+function titleMatchesName(name: string, title: string): boolean {
+  const nameTokens = foldTokens(name);
+  const distinctive = nameTokens.filter((t) => !GENERIC_WORDS.has(t));
+  if (!distinctive.length) return false; // nothing specific to verify against
+  const titleSet = new Set(foldTokens(title));
+  return distinctive.every((t) => titleSet.has(t));
+}
+
+function haversineKm(aLat: number, aLon: number, bLat: number, bLon: number): number {
+  const R = 6371;
+  const dLat = ((bLat - aLat) * Math.PI) / 180;
+  const dLon = ((bLon - aLon) * Math.PI) / 180;
+  const s =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((aLat * Math.PI) / 180) *
+      Math.cos((bLat * Math.PI) / 180) *
+      Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(s));
 }
 
 /** De-dupe by the underlying file (ignoring the width query), keep order. */
@@ -223,6 +274,70 @@ async function fetchWikipediaInfo(titles: string[]): Promise<Record<string, WpIn
   return out;
 }
 
+interface SearchHit {
+  title: string;
+  thumb?: string;
+  qid?: string;
+  lat?: number;
+  lon?: number;
+}
+
+/**
+ * Full-text search Wikipedia for a place whose exact title we don't know, and
+ * return the best *verified* match: the title must contain the name's distinctive
+ * tokens and (when both have coordinates) sit within ~25 km of it. This recovers
+ * photos for places listed under a slightly different article title, without the
+ * false positives a naive "take the top hit" search would produce.
+ */
+async function searchWikipediaImage(
+  name: string,
+  lat?: number,
+  lon?: number,
+): Promise<SearchHit | null> {
+  const url =
+    'https://en.wikipedia.org/w/api.php?action=query&format=json&formatversion=2&origin=*' +
+    '&generator=search&gsrlimit=5' +
+    `&gsrsearch=${encodeURIComponent(name)}` +
+    '&prop=pageimages|coordinates|pageprops&ppprop=wikibase_item' +
+    `&piprop=thumbnail&pithumbsize=${IMG_WIDTH}`;
+  let data: any;
+  try {
+    data = await getJson(url);
+  } catch {
+    return null;
+  }
+  const pages: any[] = (data?.query?.pages ?? []).slice().sort(
+    (a: any, b: any) => (a.index ?? 0) - (b.index ?? 0),
+  );
+
+  // Collect every candidate that both name-matches and passes the coord check,
+  // then prefer the one that actually carries a photo (and verified location).
+  // This avoids picking a photo-less disambiguation page over the real article
+  // (e.g. "Chidōkan" vs "Chidōkan (Tsuruoka)").
+  let best: SearchHit | null = null;
+  let bestScore = -1;
+  for (const p of pages) {
+    if (!titleMatchesName(name, p.title ?? '')) continue;
+    const co = p.coordinates?.[0];
+    const hasCoord = co?.lat != null && co?.lon != null;
+    const near = lat != null && lon != null && hasCoord ? haversineKm(lat, lon, co.lat, co.lon) : null;
+    if (near != null && near > 25) continue; // same name, wrong place
+
+    const thumb: string | undefined = p.thumbnail?.source;
+    const qid: string | undefined = p.pageprops?.wikibase_item;
+    if (!thumb && !qid) continue;
+
+    // Prefer a real photo, then a location-verified match, then a Wikidata link.
+    const score = (thumb ? 4 : 0) + (near != null ? 2 : 0) + (qid ? 1 : 0);
+    if (score > bestScore) {
+      bestScore = score;
+      best = { title: p.title, thumb, qid, lat: co?.lat, lon: co?.lon };
+      if (thumb && near != null) break; // ideal match — stop early
+    }
+  }
+  return best;
+}
+
 /**
  * For a set of Wikidata ids, resolve a gallery (P18 + Commons category) for any
  * that aren't cached yet, and write the result (array or null) into `cache`.
@@ -317,6 +432,45 @@ export async function resolveImages(destinations: Destination[]): Promise<Destin
       cacheDirty = true;
       if (imgs.length) for (const d of dests) addTo(d, imgs);
     }
+  }
+
+  // ---- 3) Verified Wikipedia search for still-missing top places ----
+  // Catches places listed under a slightly different article title (macrons,
+  // "(Tsuruoka)" suffixes, English vs local names). Cached under "sr:" so we
+  // never repeat a search, even when phase 2 already cached a null exact match.
+  const searchTargets = targets
+    .filter((d) => (gallery.get(d)?.length ?? 0) < TARGET_PER_PLACE)
+    .filter((d) => !(`sr:${normName(d.name)}` in cache))
+    .slice(0, SEARCH_CAP);
+
+  if (searchTargets.length) {
+    const discovered: string[] = []; // Wikidata ids to expand into galleries
+    const hits = new Map<Destination, SearchHit>();
+    await pool(searchTargets, async (d) => {
+      const hit = await searchWikipediaImage(d.name, d.lat, d.lon);
+      if (hit) {
+        hits.set(d, hit);
+        if (hit.qid) discovered.push(hit.qid);
+      }
+    });
+    cacheDirty = (await resolveWdGalleries(discovered, cache)) || cacheDirty;
+
+    for (const d of searchTargets) {
+      const hit = hits.get(d);
+      const wdImgs = hit?.qid ? cache[`wd:${hit.qid}`] ?? [] : [];
+      const imgs = dedupeImages([...(hit?.thumb ? [hit.thumb] : []), ...(wdImgs ?? [])]).slice(
+        0,
+        MAX_PER_PLACE,
+      );
+      cache[`sr:${normName(d.name)}`] = imgs.length ? imgs : null;
+      cacheDirty = true;
+    }
+  }
+
+  // Apply search results (covers both this run and cached prior runs).
+  for (const d of targets) {
+    const cached = cache[`sr:${normName(d.name)}`];
+    if (cached && cached.length) addTo(d, cached);
   }
 
   // ---- Finalize: write galleries back onto the destinations ----
