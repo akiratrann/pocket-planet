@@ -1,0 +1,79 @@
+// Core domain types for the travel assistant.
+
+export type CategoryId =
+  | 'sights'
+  | 'culture'
+  | 'nature'
+  | 'food'
+  | 'nightlife'
+  | 'shopping'
+  | 'activities'
+  | 'sleep';
+
+export interface Category {
+  id: CategoryId;
+  label: string;
+  icon: string; // emoji marker glyph
+  color: string; // hex used for map pins + accents
+  /** Wikivoyage listing "types" that map onto this app category. */
+  wvTypes: string[];
+  blurb: string;
+}
+
+export interface Destination {
+  id: string;
+  name: string;
+  category: CategoryId;
+  /** Original Wikivoyage listing type (see/do/eat/drink/buy/sleep). */
+  wvType: string;
+  lat?: number;
+  lon?: number;
+  description?: string;
+  address?: string;
+  url?: string;
+  phone?: string;
+  hours?: string;
+  price?: string;
+  wikidata?: string;
+  image?: string;
+  /** Recommendation score, normalized 0..100 across the guide. */
+  score: number;
+  /** 1-based rank within its category (1 = most recommended). */
+  rank: number;
+  /** Original position in the source article. */
+  order: number;
+  /** Human-readable reasons the item scored the way it did (for transparency + tuning). */
+  reasons: string[];
+}
+
+export interface AdviceSection {
+  id: string;
+  title: string;
+  icon: string;
+  body: string;
+}
+
+export interface GuideMeta {
+  provider: string;
+  learnedVersion: number;
+  feedbackApplied: number;
+  sources: Array<{ title: string; url: string; fetchedAt: number; poiCount: number }>;
+  ingestedPois: number;
+}
+
+export interface Guide {
+  title: string;
+  intro: string;
+  advice: AdviceSection[];
+  destinations: Destination[];
+  /** [lon, lat] map center. */
+  center: [number, number];
+  /** [minLon, minLat, maxLon, maxLat] */
+  bbox?: [number, number, number, number];
+  attribution: string;
+  sourceUrl: string;
+  /** Sub-regions / child destinations (for country/region scope drill-down). */
+  related: string[];
+  /** Present when assembled by the backend brain (RAG + learning). */
+  meta?: GuideMeta;
+}

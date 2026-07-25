@@ -1,0 +1,51 @@
+:root {
+  --bg: #f7f5f2;
+  --panel-bg: #ffffff;
+  --ink: #1e1b18;
+  --ink-soft: #5c554e;
+  --line: #e7e2db;
+  --accent: #e4572e;
+  --shadow: 0 8px 30px rgba(30, 27, 24, 0.12);
+  --radius: 16px;
+
+  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  width: 100%;
+}
+
+body {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+a {
+  color: var(--accent);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: #d8d2ca;
+  border-radius: 8px;
+  border: 3px solid var(--panel-bg);
+}
