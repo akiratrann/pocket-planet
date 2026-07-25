@@ -56,12 +56,34 @@ export interface AdviceSection {
   body: string;
 }
 
+/** A single traveller opinion, quoted/derived from a real source (never invented). */
+export interface Opinion {
+  text: string;
+  /** Where this point came from, e.g. "Wikivoyage" or an ingested source title. */
+  source: string;
+  url?: string;
+  /** The specific place the opinion is about, when it maps to one. */
+  place?: string;
+}
+
+/** Summary of what travellers say about a location, split into pros and cons. */
+export interface LocationOpinions {
+  positives: Opinion[];
+  negatives: Opinion[];
+  /** Plain-language note on how these were derived (for transparency). */
+  basis: string;
+  /** Sources the summary was built from. */
+  sources: Array<{ title: string; url?: string }>;
+}
+
 export interface GuideMeta {
   provider: string;
   learnedVersion: number;
   feedbackApplied: number;
   sources: Array<{ title: string; url: string; fetchedAt: number; poiCount: number }>;
   ingestedPois: number;
+  /** What travellers say (positive + negative), grounded in real sources. */
+  opinions?: LocationOpinions;
 }
 
 export interface Guide {

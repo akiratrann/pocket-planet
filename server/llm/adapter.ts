@@ -22,11 +22,71 @@ export interface TuningProposal {
   rationale: string;
 }
 
+export interface OpinionResult {
+  positives: string[];
+  negatives: string[];
+}
+
 export interface LLMClient {
   name: string;
   summarizeLocation(location: string, sourceText: string): Promise<string>;
   extractPOIs(location: string, sourceText: string): Promise<Destination[]>;
   proposeTuning(feedback: Feedback[], state: LearnedState): Promise<TuningProposal>;
+  /** Pull key positive/negative points from REAL source text (no invention). */
+  extractOpinions(location: string, sourceText: string): Promise<OpinionResult>;
+}
+
+// Sentiment cue lexicons used by the heuristic miner (and as an LLM fallback).
+const POSITIVE_CUES =
+  /\b(beautiful|stunning|gorgeous|spectacular|breathtaking|charming|vibrant|lovely|worth (?:a )?(?:visit|it)|must[- ]?see|must[- ]?do|unmissable|highlight|iconic|famous|renowned|popular|delicious|friendly|relaxing|peaceful|tranquil|serene|impressive|magnificent|picturesque|scenic|atmospheric|well[- ]preserved|delightful|excellent|wonderful|amazing|fantastic|favou?rite|best|great|interesting|fascinating|authentic|lively|cozy|cosy|pleasant|quaint|memorable|worthwhile|enjoyable|hidden gem|a gem|spotless|friendly)\b/i;
+const NEGATIVE_CUES =
+  /\b(crowded|overcrowded|touristy|tourist trap|overrated|overpriced|expensive|pricey|dirty|grimy|run[- ]?down|rundown|disappointing|underwhelming|noisy|packed|cramped|smelly|tacky|scam|avoid|dangerous|unsafe|sketchy|confusing|difficult|long queue|long lines|long waits?|dated|pushy|hassle|mediocre|bland|boring|dull)\b/i;
+const NEGATORS = /\b(not|no|never|without|hardly|rarely|n't|isn't|aren't|wasn't|doesn't|don't|didn't|won't)\s*$/i;
+
+function splitSentences(text: string): string[] {
+  return text
+    .split(/\n+|(?<=[.!?])\s+/)
+    .map((s) => s.replace(/^[\s*\-•\d.)]+/, '').replace(/\s+/g, ' ').trim())
+    .filter((s) => s.length >= 20 && s.length <= 220);
+}
+
+/** Count cue hits, flipping polarity when a cue is directly negated. */
+function polarity(s: string): { pos: number; neg: number } {
+  const lower = ` ${s.toLowerCase()} `;
+  let pos = 0;
+  let neg = 0;
+  const scan = (re: RegExp, isPos: boolean) => {
+    const g = new RegExp(re.source, 'gi');
+    let m: RegExpExecArray | null;
+    while ((m = g.exec(lower))) {
+      const before = lower.slice(Math.max(0, m.index - 16), m.index);
+      const negated = NEGATORS.test(before);
+      if (isPos ? !negated : negated) pos++;
+      else neg++;
+    }
+  };
+  scan(POSITIVE_CUES, true);
+  scan(NEGATIVE_CUES, false);
+  return { pos, neg };
+}
+
+/** Grounded, no-hallucination sentiment miner: returns REAL sentences from text. */
+function mineSentiment(text: string): OpinionResult {
+  const positives: string[] = [];
+  const negatives: string[] = [];
+  const seen = new Set<string>();
+  for (const s of splitSentences(text)) {
+    const key = s.toLowerCase().slice(0, 60);
+    if (seen.has(key)) continue;
+    const { pos, neg } = polarity(s);
+    if (pos === 0 && neg === 0) continue;
+    seen.add(key);
+    const clean = /[.!?]$/.test(s) ? s : `${s}.`;
+    if (neg > pos) negatives.push(clean);
+    else positives.push(clean);
+    if (positives.length + negatives.length >= 40) break;
+  }
+  return { positives, negatives };
 }
 
 function makeDestination(
@@ -97,6 +157,10 @@ const heuristic: LLMClient = {
     }
     void location;
     return pois;
+  },
+
+  async extractOpinions(_location, sourceText) {
+    return mineSentiment(sourceText);
   },
 
   async proposeTuning(feedback) {
@@ -244,6 +308,30 @@ function makeChatClient(
         return heuristic.extractPOIs(location, sourceText);
       }
     },
+    async extractOpinions(location, sourceText) {
+      try {
+        const raw = await chat(
+          'You summarize what travellers say about a place. Using ONLY the provided source text, ' +
+            'list the key POSITIVE and NEGATIVE points travellers mention. Do NOT invent anything ' +
+            'that is not supported by the text. If there are no clear opinions, return empty arrays. ' +
+            'Respond ONLY with JSON: {"positives":[string],"negatives":[string]}.',
+          `Location: ${location}\n\nSource text:\n${sourceText.slice(0, 8000)}`,
+          true,
+        );
+        const parsed = safeJson<OpinionResult>(raw, { positives: [], negatives: [] });
+        const clean = (arr: unknown): string[] =>
+          Array.isArray(arr)
+            ? arr.filter((x): x is string => typeof x === 'string' && x.trim().length > 0).slice(0, 8)
+            : [];
+        const result = { positives: clean(parsed.positives), negatives: clean(parsed.negatives) };
+        // If the model found nothing, fall back to the grounded miner.
+        if (!result.positives.length && !result.negatives.length) return mineSentiment(sourceText);
+        return result;
+      } catch {
+        return mineSentiment(sourceText);
+      }
+    },
+
     async proposeTuning(feedback, state) {
       try {
         const summary = feedback

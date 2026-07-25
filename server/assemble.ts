@@ -7,6 +7,7 @@ import type { Guide, GuideMeta } from '../src/types.ts';
 import { getLLM } from './llm/adapter.ts';
 import { store } from './store.ts';
 import { resolveImages } from './pipeline/images.ts';
+import { buildOpinions } from './pipeline/opinions.ts';
 
 export type GuideResponse = Guide & { meta: GuideMeta };
 
@@ -26,6 +27,9 @@ export async function assembleGuide(query: string): Promise<GuideResponse> {
   // Fetch real photos for places that don't already have one.
   await resolveImages(enriched.destinations);
 
+  // Summarize what travellers say (grounded in real sources; never invented).
+  const opinions = await buildOpinions(enriched, sources);
+
   const feedback = await store.getFeedback();
   const feedbackApplied = feedback.filter(
     (f) => f.location.toLowerCase() === base.title.toLowerCase(),
@@ -42,6 +46,7 @@ export async function assembleGuide(query: string): Promise<GuideResponse> {
       fetchedAt: s.fetchedAt,
       poiCount: s.pois.length,
     })),
+    opinions,
   };
 
   return { ...enriched, meta };

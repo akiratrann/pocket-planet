@@ -130,6 +130,7 @@ export default function App() {
         autoExplore={autoExplore}
         onExplore={(place) => setQuery(place)}
         onExploringChange={setExploring}
+        allCategories={active.size === 0}
       />
 
       <div className="map-controls">

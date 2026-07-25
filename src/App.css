@@ -130,6 +130,124 @@
   background: rgba(255, 255, 255, 0.25);
 }
 
+/* Checkbox-style category chips (multi-select). */
+.chip--check,
+.chip--all {
+  cursor: pointer;
+  user-select: none;
+}
+.chip--disabled {
+  opacity: 0.4;
+  cursor: default;
+  pointer-events: none;
+}
+/* Visually-hidden native checkbox (kept for keyboard + screen readers). */
+.chip__cb {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.chip__box {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 4px;
+  border: 1.5px solid currentColor;
+  opacity: 0.55;
+  font-size: 11px;
+  line-height: 1;
+  flex: 0 0 auto;
+}
+.chip--on .chip__box {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.28);
+  border-color: rgba(255, 255, 255, 0.9);
+}
+.chip__cb:focus-visible + .chip__box {
+  outline: 2px solid var(--accent, #2b7de9);
+  outline-offset: 2px;
+}
+
+/* "What travellers say" — grounded opinion summary. */
+.opinions {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  background: var(--panel-bg);
+}
+.opinions__title {
+  margin: 0 0 10px;
+  font-size: 14px;
+  font-weight: 700;
+}
+.opinions__group {
+  margin-bottom: 10px;
+}
+.opinions__head {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin-bottom: 6px;
+}
+.opinions__head--pos {
+  color: #1a7f4b;
+}
+.opinions__head--neg {
+  color: #b4432f;
+}
+.opinions__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.opinions__item {
+  font-size: 13px;
+  line-height: 1.4;
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.03);
+  border-left: 3px solid transparent;
+}
+.opinions__list--pos .opinions__item {
+  border-left-color: #1a7f4b;
+}
+.opinions__list--neg .opinions__item {
+  border-left-color: #b4432f;
+}
+.opinions__src {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 11px;
+  opacity: 0.7;
+  white-space: nowrap;
+}
+a.opinions__src {
+  color: var(--accent, #2b7de9);
+  text-decoration: none;
+}
+a.opinions__src:hover {
+  text-decoration: underline;
+}
+.opinions__basis {
+  margin: 10px 0 0;
+  font-size: 11px;
+  opacity: 0.6;
+  font-style: italic;
+}
+
 /* ---------- Panel ---------- */
 .panel {
   position: absolute;

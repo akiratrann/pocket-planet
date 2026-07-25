@@ -39,7 +39,12 @@ interface Props {
   autoExplore: boolean;
   onExplore: (placeName: string) => void;
   onExploringChange: (label: string | null) => void;
+  /** True when no category filter is active — keep the map uncluttered. */
+  allCategories: boolean;
 }
+
+/** With no category filter, show just the top highlights so the map isn't cramped. */
+const OVERVIEW_CAP = 10;
 
 /** How many pins to show at a given zoom — few when zoomed out, all up close. */
 function capForZoom(zoom: number): number {
@@ -77,6 +82,7 @@ export default function MapView({
   autoExplore,
   onExplore,
   onExploringChange,
+  allCategories,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MaplibreMap | null>(null);
@@ -91,6 +97,7 @@ export default function MapView({
   const autoExploreRef = useRef(autoExplore);
   const onExploreRef = useRef(onExplore);
   const onExploringChangeRef = useRef(onExploringChange);
+  const allCategoriesRef = useRef(allCategories);
   const lastExploredRef = useRef<string>('');
   const suppressUntilRef = useRef<number>(0);
   const exploreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -102,6 +109,7 @@ export default function MapView({
   autoExploreRef.current = autoExplore;
   onExploreRef.current = onExplore;
   onExploringChangeRef.current = onExploringChange;
+  allCategoriesRef.current = allCategories;
 
   /** Render only the pins that belong in the current viewport + zoom budget. */
   const renderMarkers = () => {
@@ -109,7 +117,11 @@ export default function MapView({
     if (!map) return;
     const markers = markersRef.current;
     const bounds = map.getBounds();
-    const cap = capForZoom(map.getZoom());
+    // In "All categories" mode keep it to the top highlights; once the user
+    // filters to specific categories, reveal the full zoom-based set.
+    const cap = allCategoriesRef.current
+      ? Math.min(OVERVIEW_CAP, capForZoom(map.getZoom()))
+      : capForZoom(map.getZoom());
 
     const inView = destRef.current
       .filter((d) => d.lat != null && d.lon != null && bounds.contains([d.lon!, d.lat!]))
@@ -230,7 +242,7 @@ export default function MapView({
   useEffect(() => {
     if (loadedRef.current) renderMarkers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [destinations, selectedId]);
+  }, [destinations, selectedId, allCategories]);
 
   // Highlight the hovered destination's pin (list -> map sync).
   useEffect(() => {
