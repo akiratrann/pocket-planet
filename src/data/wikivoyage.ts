@@ -180,6 +180,17 @@ function buildAdvice(sections: Record<string, string>): AdviceSection[] {
   return out;
 }
 
+/**
+ * Pull the parent region from Wikivoyage's breadcrumb template
+ * (e.g. `{{IsPartOf|Tohoku}}`), used to drill up a level as you zoom out.
+ */
+function extractParent(wikitext: string): string | undefined {
+  const m = wikitext.match(/\{\{\s*(?:is\s*part\s*of|isin|partoftopic)\s*\|\s*([^}|]+?)\s*\}\}/i);
+  const name = m?.[1]?.trim();
+  if (!name || name.includes(':')) return undefined;
+  return name;
+}
+
 /** Pull the "Go next" / region child links for scope drill-down. */
 function extractRelated(sections: Record<string, string>): string[] {
   const src = sections['go next'] ?? sections['regions'] ?? sections['cities'] ?? '';
@@ -453,6 +464,7 @@ export async function getGuide(query: string): Promise<Guide> {
     center,
     bbox,
     related: extractRelated(sections),
+    parent: extractParent(wikitext),
     attribution: 'Travel content from Wikivoyage, CC BY-SA 3.0',
     sourceUrl: `https://en.wikivoyage.org/wiki/${encodeURIComponent(title)}`,
   };

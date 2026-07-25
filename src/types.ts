@@ -99,6 +99,8 @@ export interface Guide {
   sourceUrl: string;
   /** Sub-regions / child destinations (for country/region scope drill-down). */
   related: string[];
+  /** Parent region from Wikivoyage's breadcrumb (e.g. Yamagata → Tōhoku), for zoom-out drill-up. */
+  parent?: string;
   /** Present when assembled by the backend brain (RAG + learning). */
   meta?: GuideMeta;
 }

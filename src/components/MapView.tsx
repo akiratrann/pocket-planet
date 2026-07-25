@@ -156,6 +156,31 @@ export default function MapView({
     }
   };
 
+  /** When you zoom out well past the current guide's area, climb to its parent region. */
+  const maybeDrillUp = (): boolean => {
+    const map = mapRef.current;
+    const guide = guideRef.current;
+    if (!map || !autoExploreRef.current) return false;
+    if (Date.now() < suppressUntilRef.current) return false;
+    if (!guide?.parent || !guide.bbox) return false;
+
+    const b = map.getBounds();
+    const viewLat = b.getNorth() - b.getSouth();
+    const viewLon = b.getEast() - b.getWest();
+    const gLat = Math.max(guide.bbox[3] - guide.bbox[1], 0.05);
+    const gLon = Math.max(guide.bbox[2] - guide.bbox[0], 0.05);
+
+    // The viewport now dwarfs the current region → surface the bigger picture.
+    if (viewLat < gLat * 2.2 || viewLon < gLon * 2.2) return false;
+
+    const key = guide.parent.trim().toLowerCase();
+    if (key === lastExploredRef.current) return false;
+    lastExploredRef.current = key;
+    onExploringChangeRef.current?.(guide.parent);
+    onExploreRef.current?.(guide.parent);
+    return true;
+  };
+
   /** When you roam to an empty area, discover what place is there and load it. */
   const maybeAutoExplore = () => {
     const map = mapRef.current;
@@ -202,7 +227,9 @@ export default function MapView({
     });
     map.on('moveend', () => {
       renderMarkers();
-      maybeAutoExplore();
+      // Zooming out climbs to the parent region; roaming to empty space loads
+      // whatever place is there. Drill-up takes priority when both could apply.
+      if (!maybeDrillUp()) maybeAutoExplore();
     });
     mapRef.current = map;
     return () => {
