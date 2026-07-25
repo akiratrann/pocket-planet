@@ -6,16 +6,49 @@ import FeedbackControls from './FeedbackControls';
 
 export default function DestinationDetail({ d, location }: { d: Destination; location: string }) {
   const select = useAppStore((s) => s.select);
-  const [imgOk, setImgOk] = useState(true);
   const cat = CATEGORY_MAP[d.category];
+
+  // Build the gallery: `images` when present, else the single `image`.
+  const photos = (d.images && d.images.length ? d.images : d.image ? [d.image] : []).filter(Boolean);
+  const [active, setActive] = useState(0);
+  const [broken, setBroken] = useState<Set<number>>(new Set());
+  const shown = photos.filter((_, i) => !broken.has(i));
+  const activeSrc = photos[active] && !broken.has(active) ? photos[active] : shown[0];
 
   return (
     <div className="detail">
       <button className="detail__back" onClick={() => select(null)}>
         ← Back to list
       </button>
-      {d.image && imgOk && (
-        <img className="detail__hero" src={d.image} alt={d.name} onError={() => setImgOk(false)} />
+      {activeSrc && (
+        <img
+          className="detail__hero"
+          src={activeSrc}
+          alt={d.name}
+          onError={() => setBroken((prev) => new Set(prev).add(photos.indexOf(activeSrc)))}
+        />
+      )}
+      {shown.length > 1 && (
+        <div className="detail__gallery">
+          {photos.map((src, i) =>
+            broken.has(i) ? null : (
+              <button
+                key={src}
+                type="button"
+                className={'detail__thumb' + (photos[active] === src ? ' detail__thumb--active' : '')}
+                onClick={() => setActive(i)}
+                aria-label={`Photo ${i + 1} of ${d.name}`}
+              >
+                <img
+                  src={src}
+                  alt=""
+                  loading="lazy"
+                  onError={() => setBroken((prev) => new Set(prev).add(i))}
+                />
+              </button>
+            ),
+          )}
+        </div>
       )}
       <div className="detail__head">
         <span className="detail__cat" style={{ background: cat.color }}>

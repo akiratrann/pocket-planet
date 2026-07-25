@@ -35,7 +35,10 @@ export interface Destination {
   hours?: string;
   price?: string;
   wikidata?: string;
+  /** Primary photo (first of `images` when present). */
   image?: string;
+  /** A small gallery of real photos of this place (best first, typically 1-5). */
+  images?: string[];
   /** Recommendation score, normalized 0..100 across the guide. */
   score: number;
   /** 1-based rank within its category (1 = most recommended). */

@@ -33,8 +33,11 @@ interface Db {
   feedback: Feedback[];
   sources: KbSource[];
   tracked: string[]; // locations to periodically re-ingest
-  /** Resolved place photos, keyed by "wd:Q123" or "nm:place name". null = looked up, none found. */
-  images: Record<string, string | null>;
+  /**
+   * Resolved place photos, keyed by "wd:Q123" or "nm:place name".
+   * An array holds the gallery (best first); null = looked up, none found.
+   */
+  images: Record<string, string[] | null>;
 }
 
 const files = {
@@ -64,9 +67,20 @@ async function ensureLoaded(): Promise<Db> {
     feedback: await readJson<Feedback[]>(files.feedback, []),
     sources: await readJson<KbSource[]>(files.sources, []),
     tracked: await readJson<string[]>(files.tracked, []),
-    images: await readJson<Record<string, string | null>>(files.images, {}),
+    images: migrateImageCache(await readJson<Record<string, unknown>>(files.images, {})),
   };
   return cache;
+}
+
+/** Accept the legacy `string | null` cache format and lift it to `string[] | null`. */
+function migrateImageCache(raw: Record<string, unknown>): Record<string, string[] | null> {
+  const out: Record<string, string[] | null> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (Array.isArray(v)) out[k] = v.filter((x): x is string => typeof x === 'string');
+    else if (typeof v === 'string') out[k] = [v];
+    else out[k] = null;
+  }
+  return out;
 }
 
 async function persist(key: keyof typeof files): Promise<void> {
@@ -115,7 +129,7 @@ export const store = {
       await persist('tracked');
     }
   },
-  async getImageCache(): Promise<Record<string, string | null>> {
+  async getImageCache(): Promise<Record<string, string[] | null>> {
     return (await ensureLoaded()).images;
   },
   async saveImageCache(): Promise<void> {

@@ -457,7 +457,41 @@
   height: 190px;
   object-fit: cover;
   border-radius: 12px;
+  margin-bottom: 8px;
+}
+.detail__gallery {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 6px;
   margin-bottom: 12px;
+  scrollbar-width: thin;
+}
+.detail__thumb {
+  flex: 0 0 auto;
+  width: 64px;
+  height: 48px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  background: none;
+  opacity: 0.7;
+  transition: opacity 0.15s ease, border-color 0.15s ease;
+}
+.detail__thumb:hover {
+  opacity: 1;
+}
+.detail__thumb--active {
+  opacity: 1;
+  border-color: var(--accent, #2b7de9);
+}
+.detail__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 .detail__head {
   display: flex;
