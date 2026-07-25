@@ -24,6 +24,8 @@ const MAX_PER_PLACE = 5;
 const MAX_RESOLVE = 400;
 /** Extra Wikipedia *searches* for still-missing top places (one request each). */
 const SEARCH_CAP = 60;
+/** Per-language geosearch-by-coordinate lookups for still-missing places. */
+const GEO_CAP = 90;
 /** Parallelism for the per-category Commons calls (kept low to avoid throttling). */
 const CONCURRENCY = 4;
 
@@ -233,12 +235,16 @@ interface WpInfo {
 /**
  * Batch-resolve, per title: the Wikipedia page image AND the linked Wikidata id
  * (so name-only listings can still get a full Commons gallery). Keyed by normName.
+ * `lang` picks which Wikipedia (e.g. "ja" for Japanese), enabling multilingual scraping.
  */
-async function fetchWikipediaInfo(titles: string[]): Promise<Record<string, WpInfo>> {
+async function fetchWikipediaInfo(
+  titles: string[],
+  lang = 'en',
+): Promise<Record<string, WpInfo>> {
   const out: Record<string, WpInfo> = {};
   for (const group of chunk(titles, 45)) {
     const url =
-      'https://en.wikipedia.org/w/api.php?action=query&format=json&formatversion=2&origin=*' +
+      `https://${lang}.wikipedia.org/w/api.php?action=query&format=json&formatversion=2&origin=*` +
       `&prop=pageimages|pageprops&ppprop=wikibase_item&piprop=thumbnail&pithumbsize=${IMG_WIDTH}&redirects=1` +
       `&titles=${group.map((t) => encodeURIComponent(t)).join('|')}`;
     try {
@@ -338,6 +344,37 @@ async function searchWikipediaImage(
   return best;
 }
 
+// Geosearch "type" values that denote a large area rather than a specific POI.
+const ADMIN_GEO_TYPES = new Set(['country', 'state', 'adm1st', 'adm2nd', 'adm3rd', 'city']);
+const GEO_RADIUS_M = 300;
+const GEO_MAX_DIST_M = 170;
+
+/**
+ * Find the Wikipedia article sitting essentially ON a coordinate, in a given
+ * language. This matches by *location*, not name — so it works across scripts
+ * (finds 大日坊 for "Dainichibo") and returns the exact POI (closest hit),
+ * skipping enclosing admin areas like the city.
+ */
+async function geosearchTitle(lat: number, lon: number, lang: string): Promise<string | null> {
+  const url =
+    `https://${lang}.wikipedia.org/w/api.php?action=query&format=json&formatversion=2&origin=*` +
+    `&list=geosearch&gsprop=type&gslimit=8&gsradius=${GEO_RADIUS_M}` +
+    `&gscoord=${lat}%7C${lon}`;
+  let data: any;
+  try {
+    data = await getJson(url);
+  } catch {
+    return null;
+  }
+  const list: any[] = data?.query?.geosearch ?? []; // sorted by distance ascending
+  for (const g of list) {
+    if (typeof g.dist === 'number' && g.dist > GEO_MAX_DIST_M) break;
+    if (ADMIN_GEO_TYPES.has(String(g.type ?? '').toLowerCase())) continue;
+    return g.title as string;
+  }
+  return null;
+}
+
 /**
  * For a set of Wikidata ids, resolve a gallery (P18 + Commons category) for any
  * that aren't cached yet, and write the result (array or null) into `cache`.
@@ -372,9 +409,13 @@ async function resolveWdGalleries(
  * still get a full Commons gallery). Results are cached on disk.
  * Mutates + returns the destinations.
  */
-export async function resolveImages(destinations: Destination[]): Promise<Destination[]> {
+export async function resolveImages(
+  destinations: Destination[],
+  langs: string[] = [],
+): Promise<Destination[]> {
   const cache = await store.getImageCache();
   let cacheDirty = false;
+  const coordKey = (d: Destination) => `${d.lat!.toFixed(4)},${d.lon!.toFixed(4)}`;
 
   // Seed each place with whatever photo Wikivoyage already gave us.
   const gallery = new Map<Destination, string[]>();
@@ -471,6 +512,52 @@ export async function resolveImages(destinations: Destination[]): Promise<Destin
   for (const d of targets) {
     const cached = cache[`sr:${normName(d.name)}`];
     if (cached && cached.length) addTo(d, cached);
+  }
+
+  // ---- 4) Multilingual geosearch: match still-missing places by COORDINATE in
+  //         the local-language Wikipedia (finds articles English lacks, across
+  //         scripts — e.g. 大日坊 for "Dainichibo"). Cached under "gs:<lang>:".
+  for (const lang of langs) {
+    const geoTargets = targets
+      .filter((d) => d.lat != null && d.lon != null)
+      .filter((d) => (gallery.get(d)?.length ?? 0) < TARGET_PER_PLACE)
+      .filter((d) => !(`gs:${lang}:${coordKey(d)}` in cache))
+      .slice(0, GEO_CAP);
+    if (!geoTargets.length) continue;
+
+    const titleOf = new Map<Destination, string>();
+    await pool(geoTargets, async (d) => {
+      const t = await geosearchTitle(d.lat!, d.lon!, lang);
+      if (t) titleOf.set(d, t);
+    });
+
+    const titles = [...new Set(titleOf.values())];
+    const info = titles.length ? await fetchWikipediaInfo(titles, lang) : {};
+    const discovered = Object.values(info)
+      .map((i) => i.qid)
+      .filter((q): q is string => !!q);
+    cacheDirty = (await resolveWdGalleries(discovered, cache)) || cacheDirty;
+
+    for (const d of geoTargets) {
+      const t = titleOf.get(d);
+      const i = t ? info[normName(t)] : undefined;
+      const wdImgs = i?.qid ? cache[`wd:${i.qid}`] ?? [] : [];
+      const imgs = dedupeImages([...(i?.thumb ? [i.thumb] : []), ...(wdImgs ?? [])]).slice(
+        0,
+        MAX_PER_PLACE,
+      );
+      cache[`gs:${lang}:${coordKey(d)}`] = imgs.length ? imgs : null;
+      cacheDirty = true;
+    }
+  }
+
+  // Apply geosearch results (this run + cached prior runs).
+  for (const d of targets) {
+    if (d.lat == null || d.lon == null) continue;
+    for (const lang of langs) {
+      const cached = cache[`gs:${lang}:${coordKey(d)}`];
+      if (cached && cached.length) addTo(d, cached);
+    }
   }
 
   // ---- Finalize: write galleries back onto the destinations ----

@@ -70,6 +70,22 @@ export async function reverseGeocode(
   }
 }
 
+/** Reverse-geocode to an ISO 3166-1 alpha-2 country code (lowercase), e.g. "jp". */
+export async function reverseCountryCode(lat: number, lon: number): Promise<string | null> {
+  const url =
+    'https://nominatim.openstreetmap.org/reverse?format=jsonv2&addressdetails=1&zoom=3' +
+    `&lat=${lat}&lon=${lon}`;
+  try {
+    const res = await fetch(url, { headers: GEO_HEADERS });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { address?: { country_code?: string } };
+    const cc = data.address?.country_code;
+    return cc ? cc.toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function geocode(query: string): Promise<GeoResult | null> {
   const url =
     'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=' +

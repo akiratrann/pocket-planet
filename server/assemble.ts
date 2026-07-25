@@ -8,6 +8,7 @@ import { getLLM } from './llm/adapter.ts';
 import { store } from './store.ts';
 import { resolveImages } from './pipeline/images.ts';
 import { buildOpinions } from './pipeline/opinions.ts';
+import { guideLanguages } from './pipeline/lang.ts';
 
 export type GuideResponse = Guide & { meta: GuideMeta };
 
@@ -24,8 +25,10 @@ export async function assembleGuide(query: string): Promise<GuideResponse> {
   const learned = await store.getLearned();
   const enriched = applyLearning(base, learned, extras);
 
-  // Fetch real photos for places that don't already have one.
-  await resolveImages(enriched.destinations);
+  // Fetch real photos — searching the local-language Wikipedia too (multilingual),
+  // which covers many places English sources miss.
+  const langs = await guideLanguages(enriched.center);
+  await resolveImages(enriched.destinations, langs);
 
   // Summarize what travellers say (grounded in real sources; never invented).
   const opinions = await buildOpinions(enriched, sources);
