@@ -3,6 +3,9 @@
 // Serves RAG-assembled guides, records feedback (relearning from your input),
 // ingests web resources on demand + on a schedule, and periodically self-tunes.
 
+// Must stay first: applies .env before any other module reads process.env.
+import './load-env.ts';
+
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
