@@ -4,14 +4,23 @@ import {
   Marker,
   NavigationControl,
   AttributionControl,
-  type StyleSpecification,
 } from 'maplibre-gl';
+import type { StyleSpecification } from 'maplibre-gl';
 import type { Destination, Guide } from '../types';
 import { CATEGORY_MAP } from '../data/categories';
 import { reverseGeocode } from '../data/geocode';
 import { translate } from '../i18n';
 
 // Clean, no-API-key raster basemap (CARTO Voyager over OpenStreetMap data).
+//
+// NOTE: an attempt to move to CARTO's vector style (so labels could be forced to
+// English — raster tiles have place names burned into the PNGs) rendered a blank
+// map: maplibre-gl v6 fetched style.json, tiles.json and the sprite, then never
+// requested a single vector tile or glyph. Direct fetches of those URLs return
+// 200, so it is a style/version incompatibility rather than the network.
+// Reverted deliberately — a working map beats localized labels. Localizing
+// labels still requires vector tiles; a different provider (OpenFreeMap,
+// MapTiler) is the next thing to try.
 const MAP_STYLE: StyleSpecification = {
   version: 8,
   sources: {
@@ -48,6 +57,12 @@ interface Props {
   lang: string;
   /** Directions line to draw, as [lon, lat] pairs. Null clears it. */
   routeGeometry?: Array<[number, number]> | null;
+  /**
+   * Itinerary mode: destination id -> 1-based stop number. When set, the map
+   * shows ONLY these places, numbered in trip order rather than by rank, and
+   * skips the zoom/score capping — a trip's stops are all wanted, always.
+   */
+  itineraryOrder?: Map<string, number> | null;
 }
 
 /** With no category filter, show just the top highlights so the map isn't cramped. */
@@ -64,7 +79,12 @@ function capForZoom(zoom: number): number {
   return 100000;
 }
 
-function markerElement(d: Destination, selected: boolean, lang: string): HTMLElement {
+function markerElement(
+  d: Destination,
+  selected: boolean,
+  lang: string,
+  stopNumber?: number,
+): HTMLElement {
   const cat = CATEGORY_MAP[d.category];
   // Wrapper is positioned by MapLibre; the inner pin owns all visual transforms,
   // so our CSS can never fight MapLibre's absolute positioning.
@@ -75,7 +95,13 @@ function markerElement(d: Destination, selected: boolean, lang: string): HTMLEle
   el.style.setProperty('--pin-color', cat.color);
   el.title = `${d.name} · #${d.rank} · ${translate(lang, 'cat_' + d.category)}`;
   el.innerHTML = `<span class="map-pin__glyph">${cat.icon}</span>`;
-  if (d.rank <= 3) el.innerHTML += `<span class="map-pin__rank">${d.rank}</span>`;
+  // In a trip the stop number is the useful label; outside one, the rank badge
+  // only earns its space for the top few.
+  if (stopNumber) {
+    el.innerHTML += `<span class="map-pin__rank map-pin__rank--stop">${stopNumber}</span>`;
+  } else if (d.rank <= 3) {
+    el.innerHTML += `<span class="map-pin__rank">${d.rank}</span>`;
+  }
   wrap.appendChild(el);
   return wrap;
 }
@@ -93,6 +119,7 @@ export default function MapView({
   frameOnLoad,
   lang,
   routeGeometry,
+  itineraryOrder,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MaplibreMap | null>(null);
@@ -114,6 +141,8 @@ export default function MapView({
   const exploreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const frameOnLoadRef = useRef(frameOnLoad);
   frameOnLoadRef.current = frameOnLoad;
+  const itineraryOrderRef = useRef(itineraryOrder);
+  itineraryOrderRef.current = itineraryOrder;
 
   destRef.current = destinations;
   guideRef.current = guide;
@@ -130,6 +159,7 @@ export default function MapView({
     const map = mapRef.current;
     if (!map) return;
     const markers = markersRef.current;
+    const trip = itineraryOrderRef.current;
     const bounds = map.getBounds();
     // In "All categories" mode keep it to the top highlights; once the user
     // filters to specific categories, reveal the full zoom-based set.
@@ -141,7 +171,11 @@ export default function MapView({
       .filter((d) => d.lat != null && d.lon != null && bounds.contains([d.lon!, d.lat!]))
       .sort((a, b) => b.score - a.score);
 
-    const chosen = inView.slice(0, cap);
+    // A trip's stops are never capped or viewport-culled: every stop matters,
+    // and culling them would make the numbered sequence read as if it had gaps.
+    const chosen = trip
+      ? destRef.current.filter((d) => d.lat != null && d.lon != null && trip.has(d.id))
+      : inView.slice(0, cap);
     // Always keep the selected pin on the map.
     const sel = selectedRef.current;
     if (sel && !chosen.some((d) => d.id === sel)) {
@@ -158,7 +192,12 @@ export default function MapView({
     }
     for (const d of chosen) {
       if (markers.has(d.id)) continue;
-      const el = markerElement(d, d.id === selectedRef.current, langRef.current);
+      const el = markerElement(
+        d,
+        d.id === selectedRef.current,
+        langRef.current,
+        trip?.get(d.id),
+      );
       el.addEventListener('click', (e) => {
         e.stopPropagation();
         onSelectRef.current?.(d.id);
@@ -303,7 +342,7 @@ export default function MapView({
   useEffect(() => {
     if (loadedRef.current) renderMarkers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [destinations, selectedId, allCategories]);
+  }, [destinations, selectedId, allCategories, itineraryOrder]);
 
   // Highlight the hovered destination's pin (list -> map sync).
   useEffect(() => {

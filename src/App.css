@@ -2161,3 +2161,66 @@ a.opinions__src:hover {
     bottom: 74px;
   }
 }
+
+/* Trip-order badge on itinerary pins (distinct from the rank badge, which is a
+   recommendation position rather than a sequence). */
+.map-pin__rank--stop {
+  background: var(--ink);
+  color: #fff;
+}
+
+/* ---------- Collapsible category filters ---------- */
+.catwrap__bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.catwrap__toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+.catwrap__toggle:hover {
+  border-color: var(--accent);
+}
+.catwrap__chevron {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+/* The active filters, named — collapsing the list must not hide what's on. */
+.catwrap__summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 400;
+  color: var(--ink-soft);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.catwrap__clear {
+  flex: 0 0 auto;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  cursor: pointer;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+.catwrap--open .catbar {
+  margin-top: 9px;
+}

@@ -17,7 +17,7 @@ import { useGuide } from './hooks/useGuide';
 import { useAppStore } from './store/useAppStore';
 import { useI18n } from './i18n';
 import { CATEGORIES } from './data/categories';
-import type { CategoryId } from './types';
+import type { CategoryId, Destination } from './types';
 
 const MIN_W = 330;
 const MAX_W = 720;
@@ -50,6 +50,8 @@ export default function App() {
   const select = useAppStore((s) => s.select);
   const panelTab = useAppStore((s) => s.panelTab);
   const routeGeometry = useAppStore((s) => s.routeGeometry);
+  const itineraries = useAppStore((s) => s.itineraries);
+  const activeItineraryId = useAppStore((s) => s.activeItineraryId);
   const setPanelTab = useAppStore((s) => s.setPanelTab);
   const panelOpen = useAppStore((s) => s.panelOpen);
   const setPanelOpen = useAppStore((s) => s.setPanelOpen);
@@ -87,6 +89,47 @@ export default function App() {
     if (active.size === 0) return guide.destinations;
     return guide.destinations.filter((d) => active.has(d.category));
   }, [guide, active]);
+
+  // On the Itinerary tab the map serves the TRIP, not the guide: only this
+  // trip's stops, numbered in the order they'll be visited. Saved stops carry
+  // their own coordinates, so a trip spanning several guides still maps.
+  const activeItinerary = itineraries.find((it) => it.id === activeItineraryId) ?? null;
+  const itineraryMode = panelTab === 'itinerary' && !!activeItinerary?.places.length;
+
+  const itineraryOrder = useMemo(() => {
+    if (!itineraryMode || !activeItinerary) return null;
+    return new Map(activeItinerary.places.map((p, i) => [p.id, i + 1]));
+  }, [itineraryMode, activeItinerary]);
+
+  const itineraryDestinations = useMemo((): Destination[] => {
+    if (!itineraryMode || !activeItinerary) return [];
+    // Saved stops are a lighter shape than Destination; fill the display-only
+    // fields the map needs rather than refetching each place's full guide.
+    return activeItinerary.places
+      .filter((p) => p.lat != null && p.lon != null)
+      .map((p, i) => ({
+        id: p.id,
+        name: p.name,
+        category: p.category,
+        wvType: '',
+        // Non-null: the filter above already dropped stops without coordinates.
+        lat: p.lat as number,
+        lon: p.lon as number,
+        score: p.score ?? 0,
+        rank: i + 1,
+        order: i,
+        // A saved stop carries no scoring rationale; the trip order is the
+        // reason it's on the map at all.
+        reasons: [],
+        // Spread conditionally: tsconfig enables exactOptionalPropertyTypes, so
+        // an explicit `undefined` is not assignable to an optional field.
+        ...(p.image ? { image: p.image } : {}),
+        ...(p.description ? { description: p.description } : {}),
+        ...(p.url ? { url: p.url } : {}),
+      }));
+  }, [itineraryMode, activeItinerary]);
+
+  const mapDestinations = itineraryMode ? itineraryDestinations : visibleDestinations;
 
   const selected = guide?.destinations.find((d) => d.id === selectedId) ?? null;
 
@@ -139,7 +182,7 @@ export default function App() {
     <div className={'app' + (dragging ? ' app--dragging' : '')}>
       <MapView
         guide={guide}
-        destinations={visibleDestinations}
+        destinations={mapDestinations}
         selectedId={selectedId}
         hoveredId={hoveredId}
         onSelect={select}
@@ -150,6 +193,7 @@ export default function App() {
         frameOnLoad={frameOnLoad}
         lang={lang}
         routeGeometry={routeGeometry}
+        itineraryOrder={itineraryOrder}
       />
 
       <div className="map-controls">
