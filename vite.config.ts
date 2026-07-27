@@ -1,6 +1,23 @@
+import { copyFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
+
+// The marketing page (landing/index.html) is standalone, self-contained HTML —
+// inline CSS/JS, no imports — so it needs no bundling. Copy it into the build as
+// landing.html; the server serves it at `/` while the SPA lives at `/app`.
+function copyLandingPage() {
+  return {
+    name: 'copy-landing-page',
+    closeBundle() {
+      copyFileSync(
+        fileURLToPath(new URL('./landing/index.html', import.meta.url)),
+        fileURLToPath(new URL('./dist/landing.html', import.meta.url)),
+      )
+    },
+  }
+}
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -20,6 +37,7 @@ export default defineConfig({
   },
   plugins: [
     react(),
+    copyLandingPage(),
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg'],
@@ -27,12 +45,15 @@ export default defineConfig({
         name: 'Pocket Planet — travel guide & map',
         short_name: 'Pocket Planet',
         description:
-          'A Lonely Planet-style travel guide and map for anywhere in the world, with the best places ranked by category.',
+          'A travel guide and map for anywhere in the world, with the best places ranked by category.',
         theme_color: '#e4572e',
         background_color: '#f7f5f2',
         display: 'standalone',
         orientation: 'portrait',
-        start_url: '/',
+        // The app lives at /app; `/` is the marketing page. Installing the PWA
+        // must open the app, not the landing page.
+        start_url: '/app',
+        scope: '/',
         icons: [
           {
             src: 'favicon.svg',
@@ -49,6 +70,18 @@ export default defineConfig({
         ],
       },
       workbox: {
+        // Navigations fall back to the app shell so client-side routes work
+        // offline — but NOT for `/` (the landing page, which the server owns)
+        // or `/api`. Without the denylist the service worker would serve the
+        // cached app shell at `/` and returning visitors would never see the
+        // marketing page again.
+        navigateFallback: '/index.html',
+        navigateFallbackDenylist: [/^\/api/, /^\/$/],
+        // Workbox otherwise maps `/` onto the precached index.html (its
+        // `directoryIndex` default), which matches BEFORE navigateFallback and
+        // would serve the app shell at `/` — hiding the landing page from
+        // anyone who has already loaded the app once. `/` is the server's.
+        directoryIndex: null,
         // Cache map tiles and Wikivoyage/Commons responses for offline-ish use.
         runtimeCaching: [
           {

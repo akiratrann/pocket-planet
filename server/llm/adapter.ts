@@ -251,14 +251,22 @@ function anthropicClient(model: string, apiKey: string): LLMClient {
       },
       body: JSON.stringify({
         model,
-        max_tokens: 1500,
+        // Current Claude models think by default, and max_tokens caps thinking
+        // AND response text together — 1500 can be consumed entirely by
+        // thinking, truncating the JSON we ask for mid-object.
+        max_tokens: 8000,
         system,
         messages: [{ role: 'user', content: user }],
       }),
     });
     if (!res.ok) throw new Error(`anthropic error ${res.status}: ${await res.text()}`);
-    const data = (await res.json()) as { content?: Array<{ text?: string }> };
-    return data.content?.[0]?.text ?? '';
+    const data = (await res.json()) as {
+      content?: Array<{ type: string; text?: string }>;
+    };
+    // Pick the text block by type rather than by position: on thinking-enabled
+    // models content[0] is a thinking block, whose `.text` is undefined — which
+    // would silently yield '' and drop us back to the heuristic engine.
+    return data.content?.find((b) => b.type === 'text')?.text ?? '';
   }
   return makeChatClient('anthropic', (s, u) => chat(s, u));
 }
@@ -395,7 +403,7 @@ export function getLLM(): LLMClient {
     case 'anthropic':
       if (process.env.ANTHROPIC_API_KEY) {
         singleton = anthropicClient(
-          process.env.ANTHROPIC_MODEL ?? 'claude-3-5-sonnet-latest',
+          process.env.ANTHROPIC_MODEL ?? 'claude-opus-5',
           process.env.ANTHROPIC_API_KEY,
         );
         break;

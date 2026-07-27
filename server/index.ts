@@ -18,6 +18,9 @@ import { runTuning } from './pipeline/tuning.ts';
 import { runTraining } from './pipeline/train.ts';
 import { answerTravelQuestion, type ChatRequest } from './pipeline/chat.ts';
 import { getLLM } from './llm/adapter.ts';
+import { randomUUID } from 'node:crypto';
+import { hashPassword, verifyPassword, signToken, userIdFromAuthHeader } from './auth.ts';
+import type { User, UserData } from './store.ts';
 
 const app = Fastify({ logger: { level: 'warn' } });
 await app.register(cors, { origin: true });
@@ -124,6 +127,63 @@ app.get('/api/train/status', async () => ({
   learnedVersion: (await store.getLearned()).version,
 }));
 
+// --- Accounts & personalization -------------------------------------------
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const publicUser = (u: User) => ({ id: u.id, email: u.email, name: u.name });
+const emptyData = (): UserData => ({ pinned: [], itineraries: [], updatedAt: 0 });
+
+app.post<{ Body: { email?: string; password?: string; name?: string } }>(
+  '/api/auth/signup',
+  async (req, reply) => {
+    const email = (req.body?.email ?? '').trim().toLowerCase();
+    const password = req.body?.password ?? '';
+    const name = (req.body?.name ?? '').trim() || email.split('@')[0];
+    if (!EMAIL_RE.test(email)) return reply.code(400).send({ error: 'A valid email is required' });
+    if (password.length < 6) return reply.code(400).send({ error: 'Password must be at least 6 characters' });
+    if (await store.getUserByEmail(email)) return reply.code(409).send({ error: 'An account with that email already exists' });
+    const user: User = {
+      id: randomUUID(),
+      email,
+      name,
+      pass: hashPassword(password),
+      createdAt: Date.now(),
+      data: emptyData(),
+    };
+    await store.createUser(user);
+    return { token: signToken(user.id), user: publicUser(user), data: user.data };
+  },
+);
+
+app.post<{ Body: { email?: string; password?: string } }>('/api/auth/login', async (req, reply) => {
+  const email = (req.body?.email ?? '').trim().toLowerCase();
+  const password = req.body?.password ?? '';
+  const user = await store.getUserByEmail(email);
+  if (!user || !verifyPassword(password, user.pass)) {
+    return reply.code(401).send({ error: 'Incorrect email or password' });
+  }
+  return { token: signToken(user.id), user: publicUser(user), data: user.data };
+});
+
+app.get('/api/auth/me', async (req, reply) => {
+  const uid = userIdFromAuthHeader(req.headers.authorization);
+  const user = uid ? await store.getUserById(uid) : undefined;
+  if (!user) return reply.code(401).send({ error: 'Not authenticated' });
+  return { user: publicUser(user), data: user.data };
+});
+
+app.put<{ Body: { pinned?: unknown[]; itineraries?: unknown[] } }>('/api/user/data', async (req, reply) => {
+  const uid = userIdFromAuthHeader(req.headers.authorization);
+  if (!uid) return reply.code(401).send({ error: 'Not authenticated' });
+  const data: UserData = {
+    pinned: Array.isArray(req.body?.pinned) ? req.body!.pinned : [],
+    itineraries: Array.isArray(req.body?.itineraries) ? req.body!.itineraries : [],
+    updatedAt: Date.now(),
+  };
+  const ok = await store.setUserData(uid, data);
+  if (!ok) return reply.code(401).send({ error: 'Not authenticated' });
+  return { ok: true, updatedAt: data.updatedAt };
+});
+
 // --- Scheduled self-improvement -------------------------------------------
 if (process.env.DISABLE_CRON !== '1') {
   // Study tracked locations for new material (default: daily 03:00).
@@ -144,8 +204,26 @@ if (process.env.DISABLE_CRON !== '1') {
 // assets + service worker. In dev this block is skipped (Vite serves the app).
 const distDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist');
 if (existsSync(join(distDir, 'index.html'))) {
-  await app.register(fastifyStatic, { root: distDir, wildcard: false });
-  // SPA fallback: any unmatched GET (that isn't an API call) returns index.html.
+  // `index: false` stops @fastify/static from claiming `GET /` to auto-serve
+  // index.html — we own that route below and point it at the landing page.
+  await app.register(fastifyStatic, {
+    root: distDir,
+    wildcard: false,
+    index: false,
+  });
+
+  // Two front doors on one origin:
+  //   /      → landing.html, the marketing page (copied in by the Vite build)
+  //   /app   → the React PWA (client-side routing lives under here)
+  const hasLanding = existsSync(join(distDir, 'landing.html'));
+
+  app.get('/', (_req, reply) =>
+    reply.sendFile(hasLanding ? 'landing.html' : 'index.html'),
+  );
+  app.get('/app', (_req, reply) => reply.sendFile('index.html'));
+
+  // SPA fallback: unmatched GETs return the app shell so deep links into /app
+  // work on a cold load. API paths still 404 as JSON.
   app.setNotFoundHandler((req, reply) => {
     const url = req.raw.url ?? '';
     if (req.method !== 'GET' || url.startsWith('/api')) {
@@ -153,7 +231,9 @@ if (existsSync(join(distDir, 'index.html'))) {
     }
     return reply.sendFile('index.html');
   });
-  console.log('[server] serving production build from dist/');
+  console.log(
+    `[server] serving production build from dist/${hasLanding ? ' (landing at /, app at /app)' : ''}`,
+  );
 }
 
 const port = Number(process.env.PORT ?? 8787);

@@ -1,0 +1,59 @@
+# Fly.io deployment config for Pocket Planet.
+#
+# Deploy:
+#   fly launch --no-deploy          # claims an app name, keeps this file
+#   fly volumes create pocket_planet_data --size 1 --region sjc
+#   fly secrets set ANTHROPIC_API_KEY=sk-ant-... LLM_PROVIDER=anthropic
+#   fly deploy
+#
+# The app name below must be globally unique on Fly — `fly launch` will offer to
+# rename it if it's taken. Keep `primary_region` and the volume region in sync;
+# a volume in another region cannot be mounted.
+
+app = "pocket-planet"
+primary_region = "sjc"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  # The server reads PORT and binds 0.0.0.0; Dockerfile defaults to 8080.
+  PORT = "8080"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+
+  # These three lines are load-bearing, not boilerplate.
+  #
+  # Pocket Planet runs node-cron jobs in-process (daily re-ingest at 03:00,
+  # self-tune every 6h). A machine that has been stopped runs no cron, so the
+  # usual scale-to-zero setup would silently never re-ingest or self-tune —
+  # the app would look fine and quietly stop learning.
+  #
+  # Keeping one machine always up is what makes the schedule real. This is also
+  # why Cloud Run is the wrong host for this app as written.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  processes = ["app"]
+
+# All persistent state is JSON files under server/.data — learned weights,
+# feedback, tracked locations, cached images, user accounts, and the generated
+# auth-secret. Fly machine filesystems are ephemeral, so WITHOUT this mount every
+# deploy or restart wipes all of it and logs every user out (the auth secret is
+# regenerated, invalidating existing sessions).
+#
+# WORKDIR in the Dockerfile is /app, so server/.data resolves to the path below.
+[[mounts]]
+  source = "pocket_planet_data"
+  destination = "/app/server/.data"
+
+# A single always-on shared CPU is plenty: the workload is I/O-bound (fetching
+# and parsing travel sources), and the in-memory dataset is a few MB of JSON.
+# Bump memory if ingesting many tracked locations starts getting OOM-killed.
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

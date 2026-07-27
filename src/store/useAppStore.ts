@@ -1,6 +1,15 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { CategoryId, Destination } from '../types';
+import {
+  authLogin,
+  authSignup,
+  authMe,
+  saveUserData,
+  setAuthToken,
+  getAuthToken,
+  type AuthUser,
+} from '../data/api';
 
 // Kept in sync with LANGUAGES in i18n.ts (inlined here to avoid a circular import).
 const SUPPORTED_LANGS = ['en', 'es', 'fr', 'de', 'it', 'pt', 'vi', 'ja', 'ko', 'zh', 'ru', 'ar'];
@@ -41,6 +50,22 @@ export interface Itinerary {
   name: string;
   createdAt: number;
   places: SavedPlace[];
+}
+
+/** Union two pinned lists by id (keeps existing order, appends new). */
+function mergePinned(a: SavedPlace[], b: SavedPlace[]): SavedPlace[] {
+  const seen = new Set(a.map((p) => p.id));
+  return [...a, ...b.filter((p) => !seen.has(p.id))];
+}
+
+/** Union itineraries by id; for a shared id keep whichever has more places. */
+function mergeItineraries(a: Itinerary[], b: Itinerary[]): Itinerary[] {
+  const byId = new Map<string, Itinerary>();
+  for (const it of [...a, ...b]) {
+    const cur = byId.get(it.id);
+    if (!cur || it.places.length > cur.places.length) byId.set(it.id, it);
+  }
+  return [...byId.values()].sort((x, y) => y.createdAt - x.createdAt);
 }
 
 export function savedFromDestination(d: Destination, location: string): SavedPlace {
@@ -88,6 +113,9 @@ interface AppState {
   /** Itinerary currently open in the tab / target for quick-adds. */
   activeItineraryId: string | null;
 
+  /** Signed-in account (null = browsing as a guest, data stays local only). */
+  authUser: AuthUser | null;
+
   setQuery: (q: string) => void;
   /** Load a place from map exploration — same as setQuery but keeps the camera put. */
   exploreTo: (q: string) => void;
@@ -113,6 +141,13 @@ interface AppState {
   moveInItinerary: (itineraryId: string, placeId: string, dir: -1 | 1) => void;
   /** Add to the active itinerary, creating a default one if none exists. */
   quickAddToItinerary: (place: SavedPlace) => void;
+
+  // Auth
+  signup: (email: string, password: string, name?: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<void>;
+  logout: () => void;
+  /** On app start: if a token exists, restore the session + merge saved data. */
+  hydrateAuth: () => Promise<void>;
 }
 
 export const useAppStore = create<AppState>()(
@@ -130,6 +165,7 @@ export const useAppStore = create<AppState>()(
       pinned: [],
       itineraries: [],
       activeItineraryId: null,
+      authUser: null,
 
       setQuery: (q) => set({ query: q, selectedId: null, frameOnLoad: true }),
       exploreTo: (q) => set({ query: q, selectedId: null, frameOnLoad: false }),
@@ -219,6 +255,43 @@ export const useAppStore = create<AppState>()(
         }
         get().addToItinerary(id, place);
       },
+
+      signup: async (email, password, name) => {
+        const res = await authSignup(email, password, name);
+        setAuthToken(res.token);
+        // Fold any guest work into the new account so nothing is lost.
+        const pinned = mergePinned(get().pinned, res.data.pinned ?? []);
+        const itineraries = mergeItineraries(get().itineraries, res.data.itineraries ?? []);
+        set({ authUser: res.user, pinned, itineraries });
+        await saveUserData({ pinned, itineraries }).catch(() => {});
+      },
+      login: async (email, password) => {
+        const res = await authLogin(email, password);
+        setAuthToken(res.token);
+        const pinned = mergePinned(res.data.pinned ?? [], get().pinned);
+        const itineraries = mergeItineraries(res.data.itineraries ?? [], get().itineraries);
+        set({ authUser: res.user, pinned, itineraries });
+        await saveUserData({ pinned, itineraries }).catch(() => {});
+      },
+      logout: () => {
+        setAuthToken(null);
+        // Clear local personalization so the next person starts fresh (it's
+        // safely stored server-side under the account).
+        set({ authUser: null, pinned: [], itineraries: [], activeItineraryId: null });
+      },
+      hydrateAuth: async () => {
+        if (!getAuthToken()) return;
+        try {
+          const { user, data } = await authMe();
+          const pinned = mergePinned(data.pinned ?? [], get().pinned);
+          const itineraries = mergeItineraries(data.itineraries ?? [], get().itineraries);
+          set({ authUser: user, pinned, itineraries });
+        } catch {
+          // Token invalid/expired → drop it and continue as guest.
+          setAuthToken(null);
+          set({ authUser: null });
+        }
+      },
     }),
     {
       name: 'pp-trip-store',
@@ -227,7 +300,23 @@ export const useAppStore = create<AppState>()(
         pinned: s.pinned,
         itineraries: s.itineraries,
         activeItineraryId: s.activeItineraryId,
+        authUser: s.authUser,
       }),
     },
   ),
 );
+
+// When signed in, push pin/itinerary changes up to the account (debounced) so
+// the experience follows the user across devices.
+if (typeof window !== 'undefined') {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  useAppStore.subscribe((state, prev) => {
+    if (!state.authUser) return;
+    if (state.pinned === prev.pinned && state.itineraries === prev.itineraries) return;
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      const s = useAppStore.getState();
+      void saveUserData({ pinned: s.pinned, itineraries: s.itineraries }).catch(() => {});
+    }, 800);
+  });
+}

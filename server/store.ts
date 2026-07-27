@@ -55,10 +55,28 @@ export interface TrainingSummary {
 
 const TRAIN_LOG_CAP = 5000;
 
+/** Personalized data synced for a signed-in user (opaque to the backend). */
+export interface UserData {
+  pinned: unknown[];
+  itineraries: unknown[];
+  updatedAt: number;
+}
+
+/** A registered account. `pass` is a scrypt "salt:hash" (never the plaintext). */
+export interface User {
+  id: string;
+  email: string; // lowercased + trimmed
+  name: string;
+  pass: string;
+  createdAt: number;
+  data: UserData;
+}
+
 interface Db {
   learned: LearnedState;
   feedback: Feedback[];
   sources: KbSource[];
+  users: User[];
   tracked: string[]; // locations to periodically re-ingest
   /**
    * Resolved place photos, keyed by "wd:Q123" or "nm:place name".
@@ -74,6 +92,7 @@ const files = {
   learned: join(DATA_DIR, 'learned.json'),
   feedback: join(DATA_DIR, 'feedback.json'),
   sources: join(DATA_DIR, 'sources.json'),
+  users: join(DATA_DIR, 'users.json'),
   tracked: join(DATA_DIR, 'tracked.json'),
   images: join(DATA_DIR, 'images.json'),
   training: join(DATA_DIR, 'training.json'),
@@ -98,6 +117,7 @@ async function ensureLoaded(): Promise<Db> {
     learned: await readJson<LearnedState>(files.learned, emptyLearnedState()),
     feedback: await readJson<Feedback[]>(files.feedback, []),
     sources: await readJson<KbSource[]>(files.sources, []),
+    users: await readJson<User[]>(files.users, []),
     tracked: await readJson<string[]>(files.tracked, []),
     images: migrateImageCache(await readJson<Record<string, unknown>>(files.images, {})),
     training: await readJson<TrainExample[]>(files.training, []),
@@ -168,6 +188,27 @@ export const store = {
   },
   async saveImageCache(): Promise<void> {
     await persist('images');
+  },
+
+  // --- Accounts -------------------------------------------------------------
+  async getUserByEmail(email: string): Promise<User | undefined> {
+    const key = email.trim().toLowerCase();
+    return (await ensureLoaded()).users.find((u) => u.email === key);
+  },
+  async getUserById(id: string): Promise<User | undefined> {
+    return (await ensureLoaded()).users.find((u) => u.id === id);
+  },
+  async createUser(user: User): Promise<void> {
+    (await ensureLoaded()).users.push(user);
+    await persist('users');
+  },
+  async setUserData(id: string, data: UserData): Promise<boolean> {
+    const db = await ensureLoaded();
+    const u = db.users.find((x) => x.id === id);
+    if (!u) return false;
+    u.data = data;
+    await persist('users');
+    return true;
   },
 
   async getTraining(): Promise<TrainExample[]> {

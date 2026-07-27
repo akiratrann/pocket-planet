@@ -9,6 +9,7 @@ import AdvicePanel from './components/AdvicePanel';
 import LearningPanel from './components/LearningPanel';
 import ItineraryPanel from './components/ItineraryPanel';
 import LanguageSelector from './components/LanguageSelector';
+import AuthWidget from './components/AuthWidget';
 import ChatWidget from './components/ChatWidget';
 import { useGuide } from './hooks/useGuide';
 import { useAppStore } from './store/useAppStore';
@@ -164,7 +165,10 @@ export default function App() {
           <span className="brand__name">Pocket&nbsp;Planet</span>
         </div>
         <SearchBar isLoading={isLoading} />
-        <LanguageSelector />
+        <div className="topbar__end">
+          <LanguageSelector />
+          <AuthWidget />
+        </div>
       </header>
 
       {collapsed && (

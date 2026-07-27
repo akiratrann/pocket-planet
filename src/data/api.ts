@@ -3,20 +3,87 @@
 // still works standalone (just without the learning/ingestion features).
 
 import type { CategoryId, Guide, LocationOpinions } from '../types';
+import type { SavedPlace, Itinerary } from '../store/useAppStore';
 import { getGuide as getGuideDirect } from './wikivoyage';
 
 const API = '/api';
 
+const TOKEN_KEY = 'pp-auth-token';
+let authToken: string | null =
+  typeof localStorage !== 'undefined' ? localStorage.getItem(TOKEN_KEY) : null;
+
+export function setAuthToken(token: string | null): void {
+  authToken = token;
+  if (typeof localStorage === 'undefined') return;
+  if (token) localStorage.setItem(TOKEN_KEY, token);
+  else localStorage.removeItem(TOKEN_KEY);
+}
+
+export function getAuthToken(): string | null {
+  return authToken;
+}
+
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
     ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+      ...init?.headers,
+    },
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error((body as { error?: string }).error ?? `API ${res.status}`);
   }
   return (await res.json()) as T;
+}
+
+// --- Auth & personalization -------------------------------------------------
+export interface AuthUser {
+  id: string;
+  email: string;
+  name: string;
+}
+
+export interface PersonalData {
+  pinned: SavedPlace[];
+  itineraries: Itinerary[];
+  updatedAt?: number;
+}
+
+export interface AuthResult {
+  token: string;
+  user: AuthUser;
+  data: PersonalData;
+}
+
+export async function authSignup(email: string, password: string, name?: string): Promise<AuthResult> {
+  return apiFetch<AuthResult>(`/auth/signup`, {
+    method: 'POST',
+    body: JSON.stringify({ email, password, name }),
+  });
+}
+
+export async function authLogin(email: string, password: string): Promise<AuthResult> {
+  return apiFetch<AuthResult>(`/auth/login`, {
+    method: 'POST',
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+export async function authMe(): Promise<{ user: AuthUser; data: PersonalData }> {
+  return apiFetch<{ user: AuthUser; data: PersonalData }>(`/auth/me`);
+}
+
+export async function saveUserData(data: {
+  pinned: SavedPlace[];
+  itineraries: Itinerary[];
+}): Promise<{ ok: boolean; updatedAt: number }> {
+  return apiFetch<{ ok: boolean; updatedAt: number }>(`/user/data`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
 }
 
 export async function fetchGuide(query: string, lang = 'en'): Promise<Guide> {
