@@ -118,6 +118,12 @@ export default function ItineraryPanel({ guide }: { guide: Guide }) {
           className="itin__title"
           value={active.name}
           onChange={(e) => renameItinerary(active.id, e.target.value)}
+          // Normalize once the user is done, not while they type — trimming
+          // mid-edit is what made the space bar look broken.
+          onBlur={(e) => {
+            const cleaned = e.target.value.trim();
+            renameItinerary(active.id, cleaned || t('itinerary_untitled'));
+          }}
           aria-label={t('rename')}
           spellCheck={false}
         />

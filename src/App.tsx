@@ -9,6 +9,7 @@ import AdvicePanel from './components/AdvicePanel';
 import LearningPanel from './components/LearningPanel';
 import ItineraryPanel from './components/ItineraryPanel';
 import TravelPanel from './components/TravelPanel';
+import BuildProgress from './components/BuildProgress';
 import LanguageSelector from './components/LanguageSelector';
 import AuthWidget from './components/AuthWidget';
 import ChatWidget from './components/ChatWidget';
@@ -240,14 +241,7 @@ export default function App() {
         </div>
 
         <div className="panel__scroll">
-          {isLoading && (
-            <div className="status">
-              <div className="spinner" />
-              <p>
-                {t('building_guide')} “{query}”…
-              </p>
-            </div>
-          )}
+          {isLoading && <BuildProgress query={query} />}
 
           {isError && (
             <div className="status status--error">

@@ -177,46 +177,34 @@ export async function assembleGuide(query: string, lang = 'en'): Promise<GuideRe
   const sourcesByQuery = query.toLowerCase() === base.title.toLowerCase() ? [] : await store.getSources(query);
   let sources = [...sourcesByTitle, ...sourcesByQuery];
 
-  // Study community discussion platforms (Reddit, Travel Stack Exchange…) unless
-  // we already have fresh threads cached. Best-effort: never block the guide.
-  const discussion = sources.filter((s) => DISCUSSION_PROVIDERS.has(s.provider));
-  const fresh = discussion.some((s) => Date.now() - s.fetchedAt < DISCUSSION_TTL_MS);
-  if (!fresh) {
-    try {
-      const added = await ingestDiscussions(base.title);
-      sources = [...sources, ...added];
-    } catch {
-      /* discussion mining is best-effort */
-    }
-  }
+  // Study community discussions (Reddit, Travel Stack Exchange…), Lonely Planet
+  // editorial, and YouTube travel videos — each skipped when we already hold a
+  // fresh copy. All three are best-effort: a failure must never block the guide.
+  //
+  // These run CONCURRENTLY. They were sequential, and since each is a round of
+  // network scraping, a cold guide paid all three end to end — a measured 53s
+  // for a new city. Nothing here is order-dependent: every freshness check reads
+  // the `sources` set as it stood before any of them ran, and none consumes
+  // another's output, so the only thing serialising them was the awaits.
+  const isFresh = (pred: (s: (typeof sources)[number]) => boolean) =>
+    sources.some((s) => pred(s) && Date.now() - s.fetchedAt < DISCUSSION_TTL_MS);
 
-  // Study Lonely Planet's editorial articles for this place (cached with the same
-  // TTL). Their text grounds the chat + opinions, and places LP names get a strong
-  // ranking boost. Best-effort: never block the guide.
-  const lp = sources.filter((s) => s.provider === LP_PROVIDER);
-  const lpFresh = lp.some((s) => Date.now() - s.fetchedAt < DISCUSSION_TTL_MS);
-  if (!lpFresh) {
-    try {
-      const added = await ingestLonelyPlanet(base.title);
-      sources = [...sources, ...added];
-    } catch {
-      /* Lonely Planet ingestion is best-effort */
-    }
-  }
+  const discussionFresh = isFresh((s) => DISCUSSION_PROVIDERS.has(s.provider));
+  const lpFresh = isFresh((s) => s.provider === LP_PROVIDER);
+  const ytFresh = isFresh((s) => s.provider === YOUTUBE_PROVIDER);
 
-  // Study YouTube travel videos (English + local language, e.g. Vietnamese for
-  // Pù Luông) unless fresh. Video titles name the real places, grounding chat +
-  // opinions and boosting frequently-featured spots. Best-effort.
-  const yt = sources.filter((s) => s.provider === YOUTUBE_PROVIDER);
-  const ytFresh = yt.some((s) => Date.now() - s.fetchedAt < DISCUSSION_TTL_MS);
-  if (!ytFresh) {
-    try {
-      const added = await ingestYouTube(base.title, langs);
-      if (added) sources = [...sources, added];
-    } catch {
-      /* YouTube ingestion is best-effort */
-    }
-  }
+  const [discussionAdded, lpAdded, ytAdded] = await Promise.all([
+    discussionFresh ? Promise.resolve([]) : ingestDiscussions(base.title).catch(() => []),
+    lpFresh ? Promise.resolve([]) : ingestLonelyPlanet(base.title).catch(() => []),
+    ytFresh ? Promise.resolve(null) : ingestYouTube(base.title, langs).catch(() => null),
+  ]);
+
+  sources = [
+    ...sources,
+    ...discussionAdded,
+    ...lpAdded,
+    ...(ytAdded ? [ytAdded] : []),
+  ];
 
   const extras = sources.flatMap((s) => s.pois);
 

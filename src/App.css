@@ -2126,3 +2126,25 @@ a.opinions__src:hover {
   line-height: 1.6;
   color: var(--ink-soft);
 }
+
+/* Build-progress narration (see BuildProgress.tsx). */
+.status__stage {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+.status__dots {
+  display: flex;
+  gap: 6px;
+  margin-top: 12px;
+}
+.status__dot {
+  width: 6px;
+  height: 6px;
+  background: var(--line);
+  border-radius: 999px;
+  transition: background 0.3s ease;
+}
+.status__dot--on {
+  background: var(--accent);
+}

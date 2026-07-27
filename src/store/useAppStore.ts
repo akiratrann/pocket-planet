@@ -171,7 +171,11 @@ export const useAppStore = create<AppState>()(
       activeItineraryId: null,
       authUser: null,
 
-      setQuery: (q) => set({ query: q, selectedId: null, frameOnLoad: true }),
+      // A new search always lands on Explore. Staying on Itinerary/Travel showed
+      // a spinner in a tab that has nothing to do with the search, which read as
+      // the itinerary being wiped by the search.
+      setQuery: (q) =>
+        set({ query: q, selectedId: null, frameOnLoad: true, panelTab: 'explore' }),
       exploreTo: (q) => set({ query: q, selectedId: null, frameOnLoad: false }),
       setLanguage: (lang) => {
         if (typeof window !== 'undefined') localStorage.setItem('pp-lang', lang);
@@ -222,11 +226,13 @@ export const useAppStore = create<AppState>()(
           itineraries: s.itineraries.filter((it) => it.id !== id),
           activeItineraryId: s.activeItineraryId === id ? null : s.activeItineraryId,
         })),
+      // Store the raw value. Trimming here ran on every keystroke, so typing a
+      // space was undone the instant it was typed (the space bar appeared
+      // broken), and clearing the field silently restored the old name. Empty
+      // names are normalized on blur instead — see ItineraryPanel.
       renameItinerary: (id, name) =>
         set((s) => ({
-          itineraries: s.itineraries.map((it) =>
-            it.id === id ? { ...it, name: name.trim() || it.name } : it,
-          ),
+          itineraries: s.itineraries.map((it) => (it.id === id ? { ...it, name } : it)),
         })),
       setActiveItinerary: (id) => set({ activeItineraryId: id }),
       addToItinerary: (itineraryId, place) =>
