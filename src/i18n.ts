@@ -33,11 +33,22 @@ type Dict = Record<string, string>;
 const en: Dict = {
   search_placeholder: 'Search a city, country or town…',
   search_aria: 'Search a destination',
+  search_suggestions: 'Destinations',
+  search_popular: 'Popular destinations',
+  search_searching: 'Looking for places…',
+  search_no_matches: 'No destinations match',
   tab_explore: 'Explore',
   tab_advice: 'Advice',
   tab_learn: 'Learn',
   places: 'places',
   all: 'All',
+  learn_offline_title: 'Personalisation unavailable',
+  learn_offline_body:
+    "Places are loading straight from Wikivoyage right now, so this guide isn't using your feedback or the ranking model. Everything else still works — try again shortly.",
+  learn_study_signin:
+    'Studying a new web resource adds places to this guide for everyone, so it needs an account. Log in to contribute.',
+  learn_train_admin:
+    'Training rewrites the ranking used for every destination, so only administrators can start a pass. It also runs automatically on a schedule.',
   filters: 'Filters',
   clear: 'Clear',
   itinerary_untitled: 'Untitled trip',
@@ -83,6 +94,10 @@ const en: Dict = {
   pin: 'Pin',
   pinned: 'Pinned',
   unpin: 'Unpin',
+  pins_title: 'Your pins',
+  pins_open: 'View all pinned places',
+  pins_unknown_place: 'Elsewhere',
+  close: 'Close',
   add_to_itinerary: 'Add to itinerary',
   added: 'Added',
   itinerary_your: 'Your itineraries',
@@ -96,6 +111,36 @@ const en: Dict = {
   remove: 'Remove',
   delete: 'Delete',
   rename: 'Rename itinerary',
+  change: 'Change',
+  create: 'Create',
+  save: 'Save',
+  cancel: 'Cancel',
+  day_one: 'day',
+  day_many: 'days',
+  itinerary_where: 'Where is this trip?',
+  itinerary_dest_none: 'No destination yet',
+  itinerary_dest_own:
+    'This trip keeps its own destination — searching elsewhere won’t change it.',
+  itinerary_dest_first: 'Choose a destination above to browse its places.',
+  itinerary_places_in: 'Places in',
+  itinerary_loading_places: 'Loading places…',
+  itinerary_no_places_found: 'Couldn’t load places for this destination.',
+  day: 'Day',
+  add_day: 'Add day',
+  remove_day: 'Remove day',
+  day_empty: 'Nothing planned for this day yet.',
+  move_to_day: 'Move to day',
+  add_transport: 'Add transport',
+  transport_finding: 'Finding route…',
+  transport_failed: 'Couldn’t find a route between these stops.',
+  transport_no_coords: 'These stops have no map coordinates.',
+  transport_approx: 'straight-line estimate',
+  transport_remove: 'Remove transport',
+  transit_gmaps: 'opens Google Maps',
+  mode_walking: 'Walk',
+  mode_cycling: 'Cycle',
+  mode_driving: 'Drive',
+  mode_transit: 'Transit',
   log_in: 'Log in',
   sign_up: 'Sign up',
   log_out: 'Log out',
@@ -123,6 +168,31 @@ const en: Dict = {
   cat_shopping: 'Shopping',
   cat_activities: 'Activities & Tours',
   cat_sleep: 'Where to Stay',
+  // Ranking transparency ("why is this #3?").
+  why_rank: 'Why',
+  why_rank_short: 'Why?',
+  of: 'of',
+  in: 'in',
+  score_basis:
+    'The score is relative: the strongest recommendation in this guide sets 100, and everything else is scaled against it.',
+  rank_scope: 'The # is this place’s position within its own category.',
+  what_lifted_it: 'What lifted it',
+  no_signals:
+    'No standout signal was found when this was scored. It ranks on how much detail its listing carries and where it appears in the source guide — nothing more.',
+  ranked_by: 'Ranked by',
+  ranked_by_body:
+    'Pocket Planet, from the sources below. Every listing is scored on how fully travel sources document it, then boosted when real travellers keep recommending it.',
+  corrections_applied: 'traveller corrections applied to',
+  model_version: 'ranking model v',
+  sources_used: 'Sources for this guide',
+  base_guide: 'base guide',
+  show_all_sources: 'Show all sources',
+  source_read: 'read',
+  no_extra_sources:
+    'Only the base guide so far. Travel discussions and editorial articles for this place haven’t been read in yet.',
+  // Photo coverage is partial by nature; say so plainly rather than showing a
+  // failed-image box or, worse, a stock photo of somewhere else.
+  photo_none: 'No photo yet',
 };
 
 const es: Dict = {
@@ -163,6 +233,9 @@ const es: Dict = {
   cat_shopping: 'Compras',
   cat_activities: 'Actividades y tours',
   cat_sleep: 'Dónde alojarse',
+  tab_travel: 'Viaje',
+  filters: 'Filtros',
+  clear: 'Borrar',
 };
 
 const fr: Dict = {
@@ -203,6 +276,9 @@ const fr: Dict = {
   cat_shopping: 'Shopping',
   cat_activities: 'Activités et visites',
   cat_sleep: 'Où dormir',
+  tab_travel: 'Trajet',
+  filters: 'Filtres',
+  clear: 'Effacer',
 };
 
 const de: Dict = {
@@ -243,6 +319,9 @@ const de: Dict = {
   cat_shopping: 'Einkaufen',
   cat_activities: 'Aktivitäten & Touren',
   cat_sleep: 'Unterkünfte',
+  tab_travel: 'Anreise',
+  filters: 'Filter',
+  clear: 'Zurücksetzen',
 };
 
 const it: Dict = {
@@ -283,6 +362,9 @@ const it: Dict = {
   cat_shopping: 'Shopping',
   cat_activities: 'Attività e tour',
   cat_sleep: 'Dove dormire',
+  tab_travel: 'Viaggio',
+  filters: 'Filtri',
+  clear: 'Cancella',
 };
 
 const pt: Dict = {
@@ -323,6 +405,9 @@ const pt: Dict = {
   cat_shopping: 'Compras',
   cat_activities: 'Atividades e passeios',
   cat_sleep: 'Onde ficar',
+  tab_travel: 'Viagem',
+  filters: 'Filtros',
+  clear: 'Limpar',
 };
 
 const vi: Dict = {
@@ -399,6 +484,9 @@ const vi: Dict = {
   cat_shopping: 'Mua sắm',
   cat_activities: 'Hoạt động & Tour',
   cat_sleep: 'Nơi lưu trú',
+  tab_travel: 'Di chuyển',
+  filters: 'Bộ lọc',
+  clear: 'Xóa',
 };
 
 const ja: Dict = {
@@ -439,6 +527,9 @@ const ja: Dict = {
   cat_shopping: 'ショッピング',
   cat_activities: 'アクティビティ・ツアー',
   cat_sleep: '宿泊',
+  tab_travel: '移動',
+  filters: 'フィルター',
+  clear: 'クリア',
 };
 
 const ko: Dict = {
@@ -479,6 +570,9 @@ const ko: Dict = {
   cat_shopping: '쇼핑',
   cat_activities: '액티비티 & 투어',
   cat_sleep: '숙소',
+  tab_travel: '이동',
+  filters: '필터',
+  clear: '지우기',
 };
 
 const zh: Dict = {
@@ -519,6 +613,9 @@ const zh: Dict = {
   cat_shopping: '购物',
   cat_activities: '活动与旅行团',
   cat_sleep: '住宿',
+  tab_travel: '交通',
+  filters: '筛选',
+  clear: '清除',
 };
 
 const ru: Dict = {
@@ -559,6 +656,9 @@ const ru: Dict = {
   cat_shopping: 'Шопинг',
   cat_activities: 'Развлечения и туры',
   cat_sleep: 'Где остановиться',
+  tab_travel: 'Дорога',
+  filters: 'Фильтры',
+  clear: 'Сбросить',
 };
 
 const ar: Dict = {
@@ -599,6 +699,9 @@ const ar: Dict = {
   cat_shopping: 'التسوّق',
   cat_activities: 'الأنشطة والجولات',
   cat_sleep: 'أماكن الإقامة',
+  tab_travel: 'التنقل',
+  filters: 'عوامل التصفية',
+  clear: 'مسح',
 };
 
 const TRANSLATIONS: Record<string, Dict> = { en, es, fr, de, it, pt, vi, ja, ko, zh, ru, ar };

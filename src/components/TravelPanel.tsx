@@ -9,8 +9,10 @@
 // than presented as an in-app result.
 
 import { useEffect, useMemo, useState } from 'react';
-import type { Destination, Guide } from '../types';
+import type { Guide } from '../types';
 import { useAppStore } from '../store/useAppStore';
+import { geocode } from '../data/geocode';
+import { useI18n } from '../i18n';
 
 type Mode = 'walking' | 'cycling' | 'driving' | 'transit';
 
@@ -40,6 +42,15 @@ interface TravelOption {
   prefilled: boolean;
 }
 
+/** Chosen in the From/To selects to type an arbitrary place instead. */
+const CUSTOM = '__custom__';
+
+interface Endpoint {
+  lat: number;
+  lon: number;
+  label: string;
+}
+
 function formatDuration(sec: number): string {
   if (!sec) return '—';
   const mins = Math.round(sec / 60);
@@ -51,6 +62,7 @@ function formatDuration(sec: number): string {
 
 export default function TravelPanel({ guide }: { guide: Guide }) {
   const setRouteGeometry = useAppStore((s) => s.setRouteGeometry);
+  const { lang } = useI18n();
 
   // Only places with real coordinates can be routed between.
   const routable = useMemo(
@@ -63,7 +75,13 @@ export default function TravelPanel({ guide }: { guide: Guide }) {
   const [mode, setMode] = useState<Mode>('walking');
   const [route, setRoute] = useState<RouteResponse | null>(null);
   const [routing, setRouting] = useState(false);
+  const [fetchedAt, setFetchedAt] = useState<number | null>(null);
   const [routeError, setRouteError] = useState<string | null>(null);
+  // Free-text endpoints. Directions shouldn't be limited to places that happen
+  // to be in the loaded guide — a trip usually starts at a hotel, a station or
+  // an address that no guide lists.
+  const [fromText, setFromText] = useState('');
+  const [toText, setToText] = useState('');
 
   const [origin, setOrigin] = useState('');
   const [date, setDate] = useState('');
@@ -73,7 +91,9 @@ export default function TravelPanel({ guide }: { guide: Guide }) {
   // Default to the two top-ranked places so the panel is useful on first open.
   useEffect(() => {
     if (!fromId && routable[0]) setFromId(routable[0].id);
-    if (!toId && routable[1]) setToId(routable[1].id);
+    // routable[1], not [0] — defaulting both to the same place left the panel
+    // stuck on "Pick two different places" before the user touched anything.
+    if (!toId && routable[1] && routable[1].id !== routable[0]?.id) setToId(routable[1].id);
   }, [routable, fromId, toId]);
 
   // Clear the route when the user moves to a different city — but deliberately
@@ -87,30 +107,79 @@ export default function TravelPanel({ guide }: { guide: Guide }) {
     setToId('');
   }, [guide.title, setRouteGeometry]);
 
-  const find = (id: string): Destination | undefined => routable.find((d) => d.id === id);
+  async function resolveEndpoint(id: string, text: string): Promise<Endpoint | null> {
+    if (id !== CUSTOM) {
+      const d = routable.find((x) => x.id === id);
+      return d ? { lat: d.lat!, lon: d.lon!, label: d.name } : null;
+    }
+    const q = text.trim();
+    if (!q) return null;
+    // Bias an otherwise ambiguous place name toward the city being viewed —
+    // "central station" should mean this city's, not one on another continent.
+    const hit = (await geocode(`${q}, ${guide.title}`, lang)) ?? (await geocode(q, lang));
+    return hit ? { lat: hit.lat, lon: hit.lon, label: hit.displayName } : null;
+  }
+
+  // Refresh on load and on any change to the route inputs, rather than waiting
+  // for a button press. Travel times shift with traffic and closures, so a
+  // figure carried over from a previous visit is worse than none — it looks
+  // current while being stale.
+  //
+  // Transit is excluded on purpose: it opens Google Maps in a new tab, and
+  // auto-firing that would hijack the browser.
+  useEffect(() => {
+    if (mode === 'transit') return;
+    if (!fromId || !toId) return;
+    if (fromId !== CUSTOM && fromId === toId) return;
+    // Typed endpoints geocode on submit, not on every keystroke.
+    if (fromId === CUSTOM || toId === CUSTOM) return;
+    const id = setTimeout(() => {
+      void getDirections();
+    }, 250); // debounce rapid from/to/mode toggling into one request
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fromId, toId, mode]);
+
+  // Booking links are rebuilt on load too, so a stale origin/date can't linger.
+  useEffect(() => {
+    if (origin.trim()) void loadOptions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function getDirections() {
-    const a = find(fromId);
-    const b = find(toId);
-    if (!a || !b) return;
-
-    if (mode === 'transit') {
-      const url =
-        `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(`${a.lat},${a.lon}`)}` +
-        `&destination=${encodeURIComponent(`${b.lat},${b.lon}`)}&travelmode=transit`;
-      window.open(url, '_blank', 'noopener,noreferrer');
-      return;
-    }
-
     setRouting(true);
     setRouteError(null);
     try {
+      const [a, b] = await Promise.all([
+        resolveEndpoint(fromId, fromText),
+        resolveEndpoint(toId, toText),
+      ]);
+      if (!a || !b) {
+        setRouteError(t_couldNotFind(a, b));
+        setRoute(null);
+        setRouteGeometry(null);
+        return;
+      }
+
+      if (mode === 'transit') {
+        const url =
+          `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(`${a.lat},${a.lon}`)}` +
+          `&destination=${encodeURIComponent(`${b.lat},${b.lon}`)}&travelmode=transit`;
+        window.open(url, '_blank', 'noopener,noreferrer');
+        return;
+      }
+
+      // no-store: routing must reflect the network as it is right now, not a
+      // response the browser or an intermediary held on to. Same reason the
+      // panel re-fetches on load rather than trusting what it showed last time.
       const res = await fetch(
         `/api/route?from=${a.lat},${a.lon}&to=${b.lat},${b.lon}&mode=${mode}`,
+        { cache: 'no-store' },
       );
       if (!res.ok) throw new Error('Could not find a route');
       const data: RouteResponse = await res.json();
       setRoute(data);
+      setFetchedAt(Date.now());
       setRouteGeometry(data.geometry.length ? data.geometry : null);
     } catch (err) {
       setRouteError((err as Error).message);
@@ -121,13 +190,19 @@ export default function TravelPanel({ guide }: { guide: Guide }) {
     }
   }
 
+  /** Name whichever endpoint failed, so the user knows which one to correct. */
+  function t_couldNotFind(a: Endpoint | null, b: Endpoint | null): string {
+    if (!a && !b) return 'Could not find either place. Try a more specific name.';
+    return `Could not find "${!a ? fromText : toText}". Try a more specific name.`;
+  }
+
   async function loadOptions() {
     if (!origin.trim()) return;
     setLoadingOptions(true);
     try {
       const params = new URLSearchParams({ from: origin.trim(), to: guide.title });
       if (date) params.set('date', date);
-      const res = await fetch(`/api/travel-options?${params}`);
+      const res = await fetch(`/api/travel-options?${params}`, { cache: 'no-store' });
       setOptions(res.ok ? await res.json() : []);
     } catch {
       setOptions([]);
@@ -212,6 +287,7 @@ export default function TravelPanel({ guide }: { guide: Guide }) {
             <label className="travel__field">
               <span>From</span>
               <select value={fromId} onChange={(e) => setFromId(e.target.value)}>
+                <option value={CUSTOM}>📍 Anywhere else…</option>
                 {routable.map((d) => (
                   <option key={d.id} value={d.id}>
                     {d.name}
@@ -219,10 +295,21 @@ export default function TravelPanel({ guide }: { guide: Guide }) {
                 ))}
               </select>
             </label>
+            {fromId === CUSTOM && (
+              <input
+                className="travel__input"
+                placeholder="Hotel, station, address…"
+                value={fromText}
+                onChange={(e) => setFromText(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && getDirections()}
+                aria-label="Start from"
+              />
+            )}
 
             <label className="travel__field">
               <span>To</span>
               <select value={toId} onChange={(e) => setToId(e.target.value)}>
+                <option value={CUSTOM}>📍 Anywhere else…</option>
                 {routable.map((d) => (
                   <option key={d.id} value={d.id}>
                     {d.name}
@@ -230,6 +317,16 @@ export default function TravelPanel({ guide }: { guide: Guide }) {
                 ))}
               </select>
             </label>
+            {toId === CUSTOM && (
+              <input
+                className="travel__input"
+                placeholder="Hotel, station, address…"
+                value={toText}
+                onChange={(e) => setToText(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && getDirections()}
+                aria-label="Travel to"
+              />
+            )}
 
             <div className="travel__modes">
               {MODES.map((m) => (
@@ -246,7 +343,7 @@ export default function TravelPanel({ guide }: { guide: Guide }) {
             <button
               className="travel__go"
               onClick={getDirections}
-              disabled={routing || fromId === toId}
+              disabled={routing || (fromId !== CUSTOM && fromId === toId)}
             >
               {routing
                 ? 'Finding route…'
@@ -255,7 +352,7 @@ export default function TravelPanel({ guide }: { guide: Guide }) {
                   : 'Get directions'}
             </button>
 
-            {fromId === toId && (
+            {fromId !== CUSTOM && fromId === toId && (
               <p className="travel__hint">Pick two different places.</p>
             )}
 
@@ -273,6 +370,11 @@ export default function TravelPanel({ guide }: { guide: Guide }) {
                   <strong>{formatDuration(route.durationSec)}</strong>
                   <span>{route.distanceKm.toFixed(1)} km</span>
                 </div>
+                {fetchedAt && (
+                  <span className="travel__fresh">
+                    Live · checked {new Date(fetchedAt).toLocaleTimeString()}
+                  </span>
+                )}
                 {route.approximate ? (
                   <p className="travel__hint">
                     Routing is unavailable right now — that&apos;s the straight-line distance.

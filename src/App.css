@@ -368,7 +368,10 @@ a.opinions__src:hover {
 .panel__scroll {
   flex: 1;
   overflow-y: auto;
-  padding: 14px;
+  /* No top padding: a `position: sticky; top: 0` child sticks to the PADDING
+     edge, so any padding-top leaves a strip above it through which scrolled
+     content shows. The sticky header below owns that space instead. */
+  padding: 0 14px 14px;
 }
 
 /* Reopen tab shown when the panel is collapsed (desktop). */
@@ -455,8 +458,10 @@ a.opinions__src:hover {
   top: 0;
   z-index: 6;
   background: var(--panel-bg);
-  margin: -14px -14px 10px;
-  padding: 12px 14px 8px;
+  /* Full-bleed horizontally so the opaque background covers the scrollbar
+     gutter too; the top padding here replaces the scroller's removed one. */
+  margin: 0 -14px 10px;
+  padding: 14px 14px 10px;
   border-bottom: 1px solid var(--line);
 }
 
@@ -2223,4 +2228,387 @@ a.opinions__src:hover {
 }
 .catwrap--open .catbar {
   margin-top: 9px;
+}
+
+/* Freshness stamp on live routing results. */
+.travel__fresh {
+  font-size: 11.5px;
+  color: var(--ink-soft);
+}
+
+/* ---------- Itinerary: destination, days & transport legs ---------- */
+
+/* Trip cards now carry their destination, so the name alone no longer has to
+   say where the trip is. */
+.itin__namewrap {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+.itin__sub {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+.itin__new {
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel-bg);
+}
+.itin__newlabel {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 12.5px;
+  font-weight: 800;
+}
+.itin__newrow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.itin__destinput {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 11px;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--ink);
+  background: var(--panel-bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.itin__destinput:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+.itin__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.itin__chips:empty {
+  display: none;
+}
+
+.itin__dest {
+  margin: 8px 0 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel-bg);
+}
+.itin__destrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.itin__destname {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.itin__destedit,
+.itin__destcancel {
+  flex-shrink: 0;
+  padding: 6px 10px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--accent);
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+.itin__destedit:hover,
+.itin__destcancel:hover {
+  border-color: var(--accent);
+}
+.itin__destcancel {
+  color: var(--ink-soft);
+}
+.itin__desthint {
+  margin: 6px 0 0;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--ink-soft);
+}
+
+.itin__day {
+  margin-top: 14px;
+}
+.itin__dayhead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+}
+.itin__dayh {
+  flex: 1;
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 800;
+}
+.itin__dayrm {
+  width: 26px;
+  height: 26px;
+  font-size: 12px;
+  color: var(--ink-soft);
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.itin__dayrm:hover {
+  color: #e04b4b;
+  border-color: #e04b4b;
+}
+.itin__dayempty {
+  margin: 10px 0 0;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+}
+.itin__addday {
+  width: 100%;
+  margin-top: 12px;
+  padding: 10px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--ink-soft);
+  background: none;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+}
+.itin__addday:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+/* Day picker sits with the reorder arrows; kept narrow so a stop row still
+   fits its thumbnail and name on a phone. */
+.srow__day {
+  max-width: 74px;
+  height: 28px;
+  padding: 0 4px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink-soft);
+  background: var(--panel-bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.srow__day:hover {
+  color: var(--ink);
+  border-color: var(--accent);
+}
+
+/* The connector between two consecutive stops: a slim bar that opens into the
+   travel modes. */
+.leg {
+  position: relative;
+  padding: 2px 0 2px 30px;
+  list-style: none;
+}
+.leg__rail {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 15px;
+  width: 2px;
+  background: var(--line);
+}
+.leg__bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 30px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-soft);
+  text-align: left;
+  background: var(--panel-bg);
+  border: 1px dashed var(--line);
+  border-radius: 999px;
+}
+.leg__bar--empty:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.leg__bar--empty:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.leg__bar--set {
+  color: var(--ink);
+  border-style: solid;
+  border-color: var(--accent);
+}
+.leg__summary {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+}
+.leg__note {
+  overflow: hidden;
+  font-weight: 600;
+  color: var(--ink-soft);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.leg__x {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  font-size: 11px;
+  color: var(--ink-soft);
+  text-decoration: none;
+  background: none;
+  border: none;
+  border-radius: 999px;
+}
+.leg__x:hover {
+  color: var(--accent);
+  background: rgba(228, 87, 46, 0.1);
+}
+.leg__modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0 2px;
+}
+.leg__mode {
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-soft);
+  background: var(--panel-bg);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+.leg__mode:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--accent);
+}
+.leg__mode--on {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.leg__mode:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.leg__err {
+  margin: 4px 0 0;
+  font-size: 11.5px;
+  color: #e04b4b;
+}
+
+/* ---------- Pinned state (on-ness) ---------- */
+/* The pinned fill is the accent, and every pin glyph is red/orange — on top of
+   it the icon vanished, so a pinned place looked exactly like an unpinned one.
+   Knock the glyph out to a white silhouette so "on" reads at a glance. */
+.pinbtn--on .pinbtn__icon {
+  filter: brightness(0) invert(1);
+}
+/* Lift the badge off the card art it floats over. */
+.pinbtn--on.dcard__pin {
+  box-shadow: 0 0 0 2px #fff, 0 2px 10px rgba(228, 87, 46, 0.45);
+}
+/* The card itself carries the state too — a 30px badge in the corner is easy
+   to miss when scanning a long list. */
+.dcard-wrap:has(.pinbtn--on) .dcard {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+
+/* ---------- Pins: header button ---------- */
+.pins-open {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--panel-bg);
+  border: none;
+  border-radius: 999px;
+  padding: 9px 14px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ink);
+  box-shadow: var(--shadow);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pins-open:hover {
+  color: var(--accent);
+}
+.pins-open__count {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--ink-soft);
+}
+.pins-open--has .pins-open__count {
+  display: grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+}
+
+/* ---------- Pins: modal ---------- */
+.pins-modal {
+  max-width: 460px;
+  padding: 22px 20px 18px;
+}
+.pins__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  font-size: 17px;
+  font-weight: 800;
+}
+/* Long pin lists scroll inside the modal, not the page behind it. */
+.pins__scroll {
+  max-height: min(62vh, 520px);
+  overflow-y: auto;
+  margin: 0 -6px;
+  padding: 0 6px;
+}
+.pins__group + .pins__group {
+  margin-top: 14px;
+}
+.pins__grouph {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 0 7px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12.5px;
+  font-weight: 800;
+  color: var(--ink-soft);
 }

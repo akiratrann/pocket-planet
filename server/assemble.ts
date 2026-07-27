@@ -7,7 +7,7 @@ import { normalizeName } from '../src/data/ranking.ts';
 import type { Destination, Guide, GuideMeta } from '../src/types.ts';
 import { getLLM } from './llm/adapter.ts';
 import { store } from './store.ts';
-import { resolveImages } from './pipeline/images.ts';
+import { resolveImages, guideScope } from './pipeline/images.ts';
 import { buildOpinions } from './pipeline/opinions.ts';
 import { discoverPOIs } from './pipeline/discover.ts';
 import { ingestDiscussions } from './pipeline/ingest.ts';
@@ -15,10 +15,20 @@ import { ingestLonelyPlanet, LP_PROVIDER } from './pipeline/lonelyplanet.ts';
 import { ingestYouTube, YOUTUBE_PROVIDER } from './pipeline/youtube.ts';
 import { localizeNames, localizeTitle } from './pipeline/localize.ts';
 import { guideLanguages } from './pipeline/lang.ts';
+import { resolveQueryPlaces, type OtherPlace } from './pipeline/places.ts';
 import { featuresOf } from './pipeline/train.ts';
 import type { KbSource, TrainExample } from './store.ts';
 
-export type GuideResponse = Guide & { meta: GuideMeta };
+export type GuideResponse = Guide & {
+  meta: GuideMeta & {
+    /**
+     * Places the query named that this guide is NOT about. "Kyoto, Osaka" builds
+     * the Kyoto guide and reports Osaka here, so the UI can offer it instead of
+     * the query half-vanishing.
+     */
+    otherPlaces?: OtherPlace[];
+  };
+};
 
 // Below this many POIs a guide is "thin" (usually an English Wikivoyage stub),
 // so we go discover more from local-language Wikipedia.
@@ -153,7 +163,10 @@ function mergeDiscovered(
 }
 
 export async function assembleGuide(query: string, lang = 'en'): Promise<GuideResponse> {
-  const base = await getGuide(query);
+  // A query can name more than one destination, and only one guide can be built.
+  // Resolving up front means the extra places are reported rather than lost.
+  const { primary, others } = await resolveQueryPlaces(query);
+  const base = await getGuide(primary);
 
   // "Study the web in every language": English Wikivoyage is thin for most of the
   // world, so when a guide is sparse we discover extra grounded POIs from the
@@ -225,7 +238,7 @@ export async function assembleGuide(query: string, lang = 'en'): Promise<GuideRe
 
   // Fetch real photos — searching the local-language Wikipedia too (multilingual),
   // which covers many places English sources miss.
-  await resolveImages(enriched.destinations, langs);
+  await resolveImages(enriched.destinations, langs, guideScope(base));
 
   // Record training examples: each place's feature vector + the real "reward" it
   // earned (community buzz + traveller feedback). The trainer later fits the
@@ -257,8 +270,9 @@ export async function assembleGuide(query: string, lang = 'en'): Promise<GuideRe
     (f) => f.location.toLowerCase() === base.title.toLowerCase(),
   ).length;
 
-  const meta: GuideMeta = {
+  const meta: GuideResponse['meta'] = {
     provider: getLLM().name,
+    otherPlaces: others.length ? others : undefined,
     learnedVersion: learned.version,
     feedbackApplied,
     ingestedPois: extras.length,

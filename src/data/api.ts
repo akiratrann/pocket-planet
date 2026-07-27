@@ -86,6 +86,39 @@ export async function saveUserData(data: {
   });
 }
 
+/**
+ * What the current caller is allowed to do with the endpoints that write shared
+ * state. The backend is the authority — this only exists so the UI can hide
+ * controls that would be refused rather than presenting buttons that 401.
+ */
+export interface Capabilities {
+  authenticated: boolean;
+  /** Study a web resource into the shared guide (any signed-in account). */
+  canIngest: boolean;
+  /** Record feedback into the shared learned state (any signed-in account). */
+  canFeedback: boolean;
+  /** Retrain/retune the global ranking model (administrators only). */
+  canTrain: boolean;
+}
+
+const NO_CAPABILITIES: Capabilities = {
+  authenticated: false,
+  canIngest: false,
+  canFeedback: false,
+  canTrain: false,
+};
+
+export async function fetchCapabilities(): Promise<Capabilities> {
+  try {
+    return await apiFetch<Capabilities>(`/capabilities`);
+  } catch {
+    // Backend unreachable (or older than this build): assume nothing is allowed.
+    // Hiding a control the user could have used is a far smaller failure than
+    // showing one that errors out.
+    return NO_CAPABILITIES;
+  }
+}
+
 export async function fetchGuide(query: string, lang = 'en'): Promise<Guide> {
   try {
     return await apiFetch<Guide>(`/guide?q=${encodeURIComponent(query)}&lang=${encodeURIComponent(lang)}`);

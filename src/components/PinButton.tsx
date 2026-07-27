@@ -28,7 +28,12 @@ export default function PinButton({
         togglePin(place);
       }}
     >
-      <span aria-hidden>{pinned ? '📌' : '📍'}</span>
+      {/* The icon is knocked out to a white silhouette when on (see App.css) —
+          a red emoji on the accent fill was all but invisible, which is why a
+          pinned place read as unpinned. */}
+      <span className="pinbtn__icon" aria-hidden>
+        {pinned ? '📌' : '📍'}
+      </span>
       {withLabel && <span className="pinbtn__label">{label}</span>}
     </button>
   );

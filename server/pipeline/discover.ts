@@ -153,6 +153,25 @@ const SKIP_P31 = new Set<string>([
   'Q1248784', // airport / international airport
   'Q205495', // filling (petrol) station
   'Q3257686', // locality (too generic / admin)
+  // Civic buildings a traveller never visits. Geosearch surfaces these in force
+  // in dense local-language editions (a town of 12k has articles for every
+  // school), and they are the worst offenders for untranslatable names: a
+  // municipal junior high school has no label or article in any other language,
+  // so it can never be presented in the reader's language.
+  'Q3914', // school
+  'Q9842', // primary school
+  'Q149566', // middle school
+  'Q159334', // secondary school
+  'Q5358913', // elementary school in Japan
+  'Q55521176', // lower secondary school in Japan
+  'Q43271061', // school for special needs education in Japan
+  'Q11396122', // school annex
+  'Q16917', // hospital
+  'Q4260475', // medical facility
+  'Q861951', // police station
+  // Abolished administrative units. ADMIN_RE drops these when the article says
+  // "is a village"; a dissolved one says "WAS a village", so it needs the class.
+  'Q18663566', // dissolved municipality of Japan
 ]);
 
 // Wikidata class → our category (language-agnostic, so it works in any edition).
@@ -237,7 +256,9 @@ const ADMIN_RE: Record<string, RegExp> = {
   it: /\bè un(?:a| )\b[^.]*\b(comune|città|frazione|provincia|regione|quartiere|circoscrizione)\b/i,
   zh: /是.{0,12}?(市|区|區|縣|县|镇|鎮|乡|鄉|村|省|自治区|行政区)/,
   ru: /(город|село|посёлок|деревня|район|область|муниципалитет|край|округ)/i,
-  ja: /(市|区|町|村|郡|都道府県|県|府)である/,
+  // Japanese articles about abolished units use the past tense ("…にあった村" —
+  // "was a village in…"), which the present-tense form alone never matched.
+  ja: /(市|区|町|村|郡|都道府県|県|府)(?:である|であった|だった)|にあった(?:村|町|市|区|郡)/,
 };
 
 function isAdminUnit(extract: string, lang: string): boolean {
@@ -389,6 +410,24 @@ async function fetchOverpass(lat: number, lon: number, radius: number): Promise<
 }
 
 // ---------------------------------------------------------------------------
+// Provenance.
+//
+// A discovered POI's text is written in the language of the Wikipedia edition it
+// came from, which is usually NOT the language the reader asked for. The id
+// carries that language so the localization pass can tell "this description is
+// already in the reader's language" from "this description happens to share a
+// script with it" (Vietnamese prose in an English guide looks Latin either way).
+// ---------------------------------------------------------------------------
+function discoveredId(lang: string, title: string): string {
+  return `disc-${lang}-${title}`.replace(/\s+/g, '_').slice(0, 60);
+}
+
+/** Wikipedia language a discovered POI's name/description came from, if known. */
+export function sourceLangOf(id: string): string | null {
+  return /^disc-([a-z]{2,3})-/.exec(id)?.[1] ?? null;
+}
+
+// ---------------------------------------------------------------------------
 // Public API.
 // ---------------------------------------------------------------------------
 const RADIUS_M = 10000; // geosearch hard cap
@@ -458,7 +497,7 @@ export async function discoverPOIs(guide: Guide, langs: string[]): Promise<Desti
       if (!cat) continue;
       if (it.qid) seenQid.add(it.qid);
       results.push({
-        id: `disc-${lang}-${it.title}`.replace(/\s+/g, '_').slice(0, 60),
+        id: discoveredId(lang, it.title),
         name,
         category: cat,
         wvType: cat === 'nature' ? 'do' : 'see',

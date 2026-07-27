@@ -24,6 +24,10 @@ export default defineConfig({
   // maplibre-gl v6 ships its own worker; let it resolve normally instead of
   // through Vite's dep pre-bundler (which mis-handles the worker entry).
   optimizeDeps: { exclude: ['maplibre-gl'] },
+  // maplibre's worker entry is an ES module that imports its shared chunk, so
+  // it has to be emitted as one too — the default `iife` output cannot carry
+  // those imports.
+  worker: { format: 'es' },
   server: {
     // Bind to all interfaces so you can open the app on your phone (same Wi-Fi).
     host: true,
@@ -84,12 +88,28 @@ export default defineConfig({
         directoryIndex: null,
         // Cache map tiles and Wikivoyage/Commons responses for offline-ish use.
         runtimeCaching: [
+          // Immutable basemap payloads: vector tiles live under a dated tileset
+          // path, and glyph/sprite URLs change only when the style does, so
+          // CacheFirst can never serve a stale-but-wrong asset here.
           {
-            urlPattern: /^https:\/\/[abc]\.basemaps\.cartocdn\.com\/.*/i,
+            urlPattern:
+              /^https:\/\/tiles\.openfreemap\.org\/(planet|natural_earth|fonts|sprites)\/.*/i,
             handler: 'CacheFirst',
             options: {
               cacheName: 'map-tiles',
-              expiration: { maxEntries: 500, maxAgeSeconds: 60 * 60 * 24 * 30 },
+              expiration: { maxEntries: 800, maxAgeSeconds: 60 * 60 * 24 * 30 },
+            },
+          },
+          // style.json and the bare `/planet` TileJSON are the mutable pair that
+          // names the current tileset. Caching them first-and-forever would pin
+          // the app to a tileset build that OpenFreeMap eventually retires, so
+          // they revalidate in the background while still working offline.
+          {
+            urlPattern: /^https:\/\/tiles\.openfreemap\.org\/(styles\/.*|planet)$/i,
+            handler: 'StaleWhileRevalidate',
+            options: {
+              cacheName: 'map-style',
+              expiration: { maxEntries: 20, maxAgeSeconds: 60 * 60 * 24 * 30 },
             },
           },
           {

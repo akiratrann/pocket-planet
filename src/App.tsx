@@ -13,6 +13,7 @@ import BuildProgress from './components/BuildProgress';
 import LanguageSelector from './components/LanguageSelector';
 import AuthWidget from './components/AuthWidget';
 import ChatWidget from './components/ChatWidget';
+import PinsPanel from './components/PinsPanel';
 import { useGuide } from './hooks/useGuide';
 import { useAppStore } from './store/useAppStore';
 import { useI18n } from './i18n';
@@ -55,6 +56,9 @@ export default function App() {
   const setPanelTab = useAppStore((s) => s.setPanelTab);
   const panelOpen = useAppStore((s) => s.panelOpen);
   const setPanelOpen = useAppStore((s) => s.setPanelOpen);
+  const pinned = useAppStore((s) => s.pinned);
+  const pinsOpen = useAppStore((s) => s.pinsOpen);
+  const setPinsOpen = useAppStore((s) => s.setPinsOpen);
   const { t, lang, dir } = useI18n();
 
   // Reflect language + direction on the document for correct RTL rendering.
@@ -214,6 +218,16 @@ export default function App() {
         </div>
         <SearchBar isLoading={isLoading} />
         <div className="topbar__end">
+          <button
+            className={'pins-open' + (pinned.length ? ' pins-open--has' : '')}
+            onClick={() => setPinsOpen(true)}
+            aria-haspopup="dialog"
+            title={t('pins_open')}
+            aria-label={t('pins_open')}
+          >
+            <span aria-hidden>📌</span>
+            <span className="pins-open__count">{pinned.length}</span>
+          </button>
           <LanguageSelector />
           <AuthWidget />
         </div>
@@ -285,34 +299,47 @@ export default function App() {
         </div>
 
         <div className="panel__scroll">
-          {isLoading && <BuildProgress query={query} />}
-
-          {isError && (
-            <div className="status status--error">
-              <p>
-                {t('error_title')} “{query}”.
-              </p>
-              <p className="status__hint">{(error as Error)?.message ?? t('error_hint')}</p>
-            </div>
-          )}
-
-          {guide && !isLoading && (
+          {/* The itinerary belongs to its own destination, not to whatever is in
+              the search bar, so it renders regardless of guide loading state.
+              Gating it behind the search meant starting a new search replaced a
+              trip the user was editing with a "Building your guide…" spinner —
+              the data survived, but it read as though the trip had been wiped. */}
+          {panelTab === 'itinerary' ? (
+            <ItineraryPanel guide={guide} />
+          ) : (
             <>
-              {panelTab === 'explore' &&
-                (selected ? (
-                  <DestinationDetail d={selected} location={guide.title} />
-                ) : (
-                  <>
-                    <div className="panel__sticky">
-                      <CategoryBar counts={counts} />
-                    </div>
-                    <DestinationList destinations={visibleDestinations} location={guide.title} />
-                  </>
-                ))}
-              {panelTab === 'advice' && <AdvicePanel guide={guide} />}
-              {panelTab === 'itinerary' && <ItineraryPanel guide={guide} />}
-              {panelTab === 'travel' && <TravelPanel guide={guide} />}
-              {panelTab === 'learn' && <LearningPanel guide={guide} />}
+              {isLoading && <BuildProgress query={query} />}
+
+              {isError && (
+                <div className="status status--error">
+                  <p>
+                    {t('error_title')} “{query}”.
+                  </p>
+                  <p className="status__hint">{(error as Error)?.message ?? t('error_hint')}</p>
+                </div>
+              )}
+
+              {guide && !isLoading && (
+                <>
+                  {panelTab === 'explore' &&
+                    (selected ? (
+                      <DestinationDetail d={selected} location={guide.title} />
+                    ) : (
+                      <>
+                        <div className="panel__sticky">
+                          <CategoryBar counts={counts} />
+                        </div>
+                        <DestinationList
+                          destinations={visibleDestinations}
+                          location={guide.title}
+                        />
+                      </>
+                    ))}
+                  {panelTab === 'advice' && <AdvicePanel guide={guide} />}
+                  {panelTab === 'travel' && <TravelPanel guide={guide} />}
+                  {panelTab === 'learn' && <LearningPanel guide={guide} />}
+                </>
+              )}
             </>
           )}
         </div>
@@ -329,6 +356,7 @@ export default function App() {
       </aside>
 
       <ChatWidget guide={guide} />
+      {pinsOpen && <PinsPanel />}
     </div>
   );
 }

@@ -5,11 +5,15 @@
 
 // Must stay first: applies .env before any other module reads process.env.
 import './load-env.ts';
+import { installUpstreamFetch } from './upstream.ts';
 
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { lookup } from 'node:dns/promises';
+import { BlockList, isIP } from 'node:net';
 import Fastify from 'fastify';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
 import compress from '@fastify/compress';
@@ -29,14 +33,8 @@ import { randomUUID } from 'node:crypto';
 import { hashPassword, verifyPassword, signToken, userIdFromAuthHeader } from './auth.ts';
 import type { User, UserData } from './store.ts';
 
-// Load local .env for development (Node built-in — no dependency). Runs before
-// any env is read (getLLM is lazy). Deployed environments inject real env vars,
-// so a missing file here is expected and harmless.
-try {
-  process.loadEnvFile();
-} catch {
-  /* no .env file present */
-}
+// Identify + rate-limit ourselves to Wikimedia before any scraping starts.
+installUpstreamFetch();
 
 const app = Fastify({ logger: { level: 'warn' } });
 await app.register(cors, { origin: true });
@@ -74,6 +72,188 @@ app.get<{ Querystring: { q?: string; lang?: string } }>('/api/guide', async (req
   }
 });
 
+// --- Authorisation for state-mutating endpoints ----------------------------
+//
+// Reads (/api/guide, /api/learned, /api/sources, /api/train/status…) stay open:
+// they're the product. Everything that WRITES shared state did too, which meant
+// any anonymous visitor could make the server fetch a URL of their choosing
+// (SSRF) and splice the result into the guide everyone sees, or retrain the
+// global ranking model. Writes now need an account, and the two endpoints that
+// move the GLOBAL model need an operator.
+//
+// Admin is an env allow-list rather than a flag on the user record because the
+// user store's shape is owned elsewhere, and because "who may retrain the model
+// everyone sees" is a deployment decision, not user data — it should be
+// grantable/revocable without a data migration. Unset ADMIN_EMAILS means NOBODY
+// is an admin: failing closed is the right default for a public deployment, and
+// the scheduled cron pass still keeps the model fresh without any human.
+//   ADMIN_EMAILS=ops@example.com,someone@example.org
+const ADMIN_EMAILS = new Set(
+  (process.env.ADMIN_EMAILS ?? '')
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean),
+);
+
+const isAdmin = (u: User): boolean => ADMIN_EMAILS.has(u.email.toLowerCase());
+
+/**
+ * Resolve the caller from the existing bearer-token scheme, or answer 401.
+ * Returns null once the reply has been sent, so handlers do `if (!u) return reply;`.
+ */
+async function requireUser(req: FastifyRequest, reply: FastifyReply): Promise<User | null> {
+  const uid = userIdFromAuthHeader(req.headers.authorization);
+  const user = uid ? await store.getUserById(uid) : undefined;
+  if (!user) {
+    reply.code(401).send({ error: 'Sign in to use this feature' });
+    return null;
+  }
+  return user;
+}
+
+/** As `requireUser`, but also demands membership of the ADMIN_EMAILS allow-list. */
+async function requireAdmin(req: FastifyRequest, reply: FastifyReply): Promise<User | null> {
+  const user = await requireUser(req, reply);
+  if (!user) return null;
+  if (!isAdmin(user)) {
+    // 403, not 401: the credentials are fine, the permission isn't — retrying
+    // with a different token is the wrong advice to give a client here.
+    reply.code(403).send({ error: 'Only an administrator can change the global ranking model' });
+    return null;
+  }
+  return user;
+}
+
+// What the signed-in (or anonymous) caller is allowed to do. The UI reads this
+// so it can hide controls it knows will be refused, instead of offering buttons
+// that 401. Purely advisory — every endpoint re-checks for itself.
+app.get('/api/capabilities', async (req) => {
+  const uid = userIdFromAuthHeader(req.headers.authorization);
+  const user = uid ? await store.getUserById(uid) : undefined;
+  return {
+    authenticated: !!user,
+    canIngest: !!user,
+    canFeedback: !!user,
+    canTrain: !!user && isAdmin(user),
+  };
+});
+
+// --- SSRF hardening for /api/ingest ----------------------------------------
+//
+// `/api/ingest` asks the SERVER to fetch a caller-supplied URL, so the URL is
+// hostile input even from a signed-in user: the server sits inside the
+// deployment's network and can reach things the caller cannot — the cloud
+// metadata service (169.254.169.254 hands out instance credentials), sibling
+// services on loopback, the private VPC. Deny-list the addresses that are only
+// reachable from the inside, and judge the RESOLVED address, because
+// `http://localhost/` and an attacker-controlled name with an A record of
+// 127.0.0.1 are the same attack wearing different hats.
+const BLOCKED_NETS = new BlockList();
+// IPv4
+BLOCKED_NETS.addSubnet('0.0.0.0', 8, 'ipv4'); // "this network"
+BLOCKED_NETS.addSubnet('10.0.0.0', 8, 'ipv4'); // private
+BLOCKED_NETS.addSubnet('100.64.0.0', 10, 'ipv4'); // carrier-grade NAT
+BLOCKED_NETS.addSubnet('127.0.0.0', 8, 'ipv4'); // loopback
+BLOCKED_NETS.addSubnet('169.254.0.0', 16, 'ipv4'); // link-local + cloud metadata
+BLOCKED_NETS.addSubnet('172.16.0.0', 12, 'ipv4'); // private
+BLOCKED_NETS.addSubnet('192.0.0.0', 24, 'ipv4'); // IETF protocol assignments
+BLOCKED_NETS.addSubnet('192.168.0.0', 16, 'ipv4'); // private
+BLOCKED_NETS.addSubnet('198.18.0.0', 15, 'ipv4'); // benchmarking
+BLOCKED_NETS.addSubnet('224.0.0.0', 4, 'ipv4'); // multicast
+BLOCKED_NETS.addSubnet('240.0.0.0', 4, 'ipv4'); // reserved + 255.255.255.255
+// IPv6
+BLOCKED_NETS.addAddress('::', 'ipv6'); // unspecified
+BLOCKED_NETS.addAddress('::1', 'ipv6'); // loopback
+BLOCKED_NETS.addSubnet('fc00::', 7, 'ipv6'); // unique-local
+BLOCKED_NETS.addSubnet('fe80::', 10, 'ipv6'); // link-local
+BLOCKED_NETS.addSubnet('ff00::', 8, 'ipv6'); // multicast
+
+const URL_REFUSED =
+  'That URL is not allowed. Only public http(s) addresses can be studied.';
+
+function isBlockedAddress(raw: string): boolean {
+  const ip = raw.replace(/^\[/, '').replace(/\]$/, '').split('%')[0]; // brackets + zone id
+  const family = isIP(ip);
+  if (family === 4) return BLOCKED_NETS.check(ip, 'ipv4');
+  if (family === 6) {
+    // ::ffff:127.0.0.1 dials the IPv4 loopback, so judge the embedded address.
+    const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(ip);
+    if (mapped && isIP(mapped[1]) === 4) return BLOCKED_NETS.check(mapped[1], 'ipv4');
+    return BLOCKED_NETS.check(ip, 'ipv6');
+  }
+  return true; // not an address we can reason about → refuse
+}
+
+/** Parse + vet one URL. Throws with a caller-safe message; never leaks internals. */
+async function vetUrl(raw: string): Promise<URL> {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    throw new Error('That is not a valid URL.');
+  }
+  // file:, data:, gopher:, ftp: … all let the fetcher read things that aren't
+  // "a web page about a place".
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error(URL_REFUSED);
+  // `http://public.example@127.0.0.1/` reads as a public host to a human.
+  if (u.username || u.password) throw new Error(URL_REFUSED);
+
+  const host = u.hostname.replace(/^\[/, '').replace(/\]$/, '');
+  // WHATWG already normalised decimal/hex/octal IPv4 forms (http://2130706433/
+  // becomes 127.0.0.1) before we get here.
+  if (isIP(host)) {
+    if (isBlockedAddress(host)) throw new Error(URL_REFUSED);
+    return u;
+  }
+  let addrs: Array<{ address: string }>;
+  try {
+    addrs = await lookup(host, { all: true });
+  } catch {
+    throw new Error(`Could not resolve ${host}.`);
+  }
+  // ALL answers must be public: a name with both a public and a loopback record
+  // is a rebinding attempt, and we have no say over which one fetch() picks.
+  if (!addrs.length || addrs.some((a) => isBlockedAddress(a.address))) {
+    throw new Error(URL_REFUSED);
+  }
+  return u;
+}
+
+const MAX_REDIRECTS = 5;
+
+/**
+ * Vet the URL *and every hop it redirects through*, returning the final URL for
+ * the ingester to fetch. Without this the address checks are trivially bypassed:
+ * an attacker points us at their own public host, which 302s to
+ * http://169.254.169.254/… and the ingester's own redirect-following fetch walks
+ * right into it.
+ *
+ * Residual risk: the name is resolved here and again by the ingester, so a DNS
+ * record that flips between the two lookups (rebinding) can still slip past.
+ * Closing that needs the fetch itself pinned to the vetted IP, which lives in
+ * server/pipeline/ingest.ts.
+ */
+async function resolveIngestTarget(raw: string): Promise<string> {
+  let current = await vetUrl(raw);
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    let res: Response;
+    try {
+      res = await fetch(current, {
+        redirect: 'manual',
+        headers: { 'User-Agent': 'PocketPlanet/1.0 (travel guide ingestion)' },
+      });
+    } catch {
+      throw new Error(`Could not fetch ${current.href}.`);
+    }
+    // We only wanted the status line; don't hold the socket open for the body.
+    await res.body?.cancel().catch(() => undefined);
+    const location = res.status >= 300 && res.status < 400 ? res.headers.get('location') : null;
+    if (!location) return current.href;
+    current = await vetUrl(new URL(location, current).href);
+  }
+  throw new Error('Too many redirects.');
+}
+
 interface FeedbackBody {
   location: string;
   name?: string;
@@ -83,7 +263,11 @@ interface FeedbackBody {
   note?: string;
 }
 
+// Feedback is folded straight into the GLOBAL learned state that ranks places
+// for every visitor, so an open endpoint here is a model-poisoning primitive.
+// Any account is enough — an account makes the write attributable and rate-able.
 app.post<{ Body: FeedbackBody }>('/api/feedback', async (req, reply) => {
+  if (!(await requireUser(req, reply))) return reply;
   const b = req.body;
   if (!b?.location || !b?.kind) {
     return reply.code(400).send({ error: 'location and kind are required' });
@@ -110,12 +294,27 @@ app.get<{ Querystring: { location?: string } }>('/api/sources', async (req) =>
   store.getSources(req.query.location),
 );
 
+// Ingestion makes the server fetch a URL and merges what it finds into the
+// guide EVERY visitor sees, so it needs both an account and URL vetting.
 app.post<{ Body: { location: string; url?: string } }>('/api/ingest', async (req, reply) => {
+  if (!(await requireUser(req, reply))) return reply;
   const { location, url } = req.body ?? {};
   if (!location) return reply.code(400).send({ error: 'location is required' });
+
+  // Vet BEFORE tracking, so a rejected URL doesn't leave the location queued
+  // for the scheduler as a side effect.
+  let target: string | undefined;
+  if (url) {
+    try {
+      target = await resolveIngestTarget(url);
+    } catch (err) {
+      return reply.code(400).send({ error: (err as Error).message });
+    }
+  }
+
   await store.track(location);
   try {
-    const src = url ? await ingestUrl(location, url) : await ingestLocationAuto(location);
+    const src = target ? await ingestUrl(location, target) : await ingestLocationAuto(location);
     if (!src) return reply.code(502).send({ error: 'Nothing could be ingested for that location' });
     return { ok: true, source: { title: src.title, url: src.url, poiCount: src.pois.length, provider: src.provider } };
   } catch (err) {
@@ -124,7 +323,10 @@ app.post<{ Body: { location: string; url?: string } }>('/api/ingest', async (req
   }
 });
 
+// Adds a location to the set the scheduler re-ingests forever, so it's a
+// write to shared state (and an amplification lever) like the rest.
 app.post<{ Body: { location: string } }>('/api/track', async (req, reply) => {
+  if (!(await requireUser(req, reply))) return reply;
   const { location } = req.body ?? {};
   if (!location) return reply.code(400).send({ error: 'location is required' });
   await store.track(location);
@@ -189,10 +391,19 @@ app.get<{
   return getTravelOptions({ from, to, date });
 });
 
-app.post('/api/tune', async () => runTuning());
+// Tuning and training rewrite the ranking weights used for EVERY location and
+// EVERY visitor. One signed-up account shouldn't be able to reshape what the
+// whole product recommends, so these two are the admin-only pair.
+app.post('/api/tune', async (req, reply) => {
+  if (!(await requireAdmin(req, reply))) return reply;
+  return runTuning();
+});
 
 // Train the ranking model on recorded feature/reward examples (+ keyword mining).
-app.post('/api/train', async () => runTraining());
+app.post('/api/train', async (req, reply) => {
+  if (!(await requireAdmin(req, reply))) return reply;
+  return runTraining();
+});
 
 // Training status: how much signal we've gathered + the last training pass.
 app.get('/api/train/status', async () => ({

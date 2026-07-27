@@ -1,6 +1,15 @@
 import { useEffect, useState } from 'react';
+import { useI18n } from '../i18n';
 import { useQueryClient } from '@tanstack/react-query';
-import { ingest, trainModel, trainStatus, type TrainStatus } from '../data/api';
+import {
+  fetchCapabilities,
+  ingest,
+  trainModel,
+  trainStatus,
+  type Capabilities,
+  type TrainStatus,
+} from '../data/api';
+import { useAppStore } from '../store/useAppStore';
 import type { Guide } from '../types';
 
 /**
@@ -11,10 +20,15 @@ import type { Guide } from '../types';
 export default function LearningPanel({ guide }: { guide: Guide }) {
   const qc = useQueryClient();
   const meta = guide.meta;
+  const { t } = useI18n();
   const [url, setUrl] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [status, setStatus] = useState<TrainStatus | null>(null);
+  const [caps, setCaps] = useState<Capabilities | null>(null);
+  // Re-ask the backend whenever the signed-in identity changes: logging in or
+  // out has to move the controls without a reload.
+  const authUser = useAppStore((s) => s.authUser);
 
   const offline = !meta;
 
@@ -24,6 +38,22 @@ export default function LearningPanel({ guide }: { guide: Guide }) {
       .then(setStatus)
       .catch(() => setStatus(null));
   }, [offline, meta?.learnedVersion]);
+
+  useEffect(() => {
+    if (offline) return;
+    let live = true;
+    fetchCapabilities().then((c) => {
+      if (live) setCaps(c);
+    });
+    return () => {
+      live = false;
+    };
+  }, [offline, authUser?.id]);
+
+  // Until the answer arrives, assume nothing is permitted — better a control
+  // that appears a moment late than one that appears and then 401s.
+  const canIngest = caps?.canIngest ?? false;
+  const canTrain = caps?.canTrain ?? false;
 
   async function study(withUrl?: string) {
     setBusy('study');
@@ -55,16 +85,19 @@ export default function LearningPanel({ guide }: { guide: Guide }) {
     }
   }
 
+  // No `meta` means this guide came from the client-side Wikivoyage fallback
+  // rather than our backend — places still load, but nothing that depends on
+  // the backend (feedback memory, ingestion, self-tuning) is available.
+  //
+  // This used to print "npm run dev:all", which is a developer instruction: in
+  // production it reached real users as advice they could neither follow nor
+  // understand. Describe the state and what still works instead.
   if (offline) {
     return (
       <div className="learn">
         <div className="learn__offline">
-          <h4>🧠 Learning engine offline</h4>
-          <p>
-            The app is reading Wikivoyage directly. Start the backend to enable
-            feedback memory, web ingestion and self-tuning:
-          </p>
-          <pre className="learn__code">npm run dev:all</pre>
+          <h4>🧠 {t('learn_offline_title')}</h4>
+          <p>{t('learn_offline_body')}</p>
         </div>
       </div>
     );
@@ -93,25 +126,31 @@ export default function LearningPanel({ guide }: { guide: Guide }) {
 
       <div className="learn__section">
         <h4>📡 Study a new web resource</h4>
-        <p className="learn__hint">
-          Paste a URL (a “best things to do in {guide.title}” article, a blog, an
-          official site) and the engine will read it, extract places, and merge
-          them into this guide.
-        </p>
-        <div className="learn__row">
-          <input
-            className="learn__input"
-            placeholder={`https://…  (about ${guide.title})`}
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-          />
-          <button className="btn" disabled={!!busy || !url.trim()} onClick={() => study(url)}>
-            {busy === 'study' ? '…' : 'Study'}
-          </button>
-        </div>
-        <button className="btn btn--ghost learn__auto" disabled={!!busy} onClick={() => study()}>
-          ✨ Auto-study {guide.title} (Wikipedia)
-        </button>
+        {canIngest ? (
+          <>
+            <p className="learn__hint">
+              Paste a URL (a “best things to do in {guide.title}” article, a blog, an
+              official site) and the engine will read it, extract places, and merge
+              them into this guide.
+            </p>
+            <div className="learn__row">
+              <input
+                className="learn__input"
+                placeholder={`https://…  (about ${guide.title})`}
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+              />
+              <button className="btn" disabled={!!busy || !url.trim()} onClick={() => study(url)}>
+                {busy === 'study' ? '…' : 'Study'}
+              </button>
+            </div>
+            <button className="btn btn--ghost learn__auto" disabled={!!busy} onClick={() => study()}>
+              ✨ Auto-study {guide.title} (Wikipedia)
+            </button>
+          </>
+        ) : (
+          <p className="learn__hint learn__hint--muted">{t('learn_study_signin')}</p>
+        )}
       </div>
 
       <div className="learn__section">
@@ -153,9 +192,13 @@ export default function LearningPanel({ guide }: { guide: Guide }) {
           </div>
         )}
 
-        <button className="btn" disabled={!!busy} onClick={train}>
-          {busy === 'train' ? 'Training…' : '🧠 Train the model now'}
-        </button>
+        {canTrain ? (
+          <button className="btn" disabled={!!busy} onClick={train}>
+            {busy === 'train' ? 'Training…' : '🧠 Train the model now'}
+          </button>
+        ) : (
+          <p className="learn__hint learn__hint--muted">{t('learn_train_admin')}</p>
+        )}
         {status?.last && (
           <p className="learn__hint learn__hint--muted">
             Last trained {new Date(status.last.at).toLocaleString()}.

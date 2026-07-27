@@ -12,6 +12,81 @@ import {
 
 const API = 'https://en.wikivoyage.org/w/api.php';
 
+// ---------------------------------------------------------------------------
+// HTML entities.
+//
+// Wikivoyage editors write prices and prose with raw HTML entities
+// (`price=&yen;300`, `&mdash;`, `&#8364;`). MediaWiki resolves them when it
+// renders a page, but we consume wikitext directly, so they reached the UI
+// verbatim ("&yen;300" instead of "¥300"). Decoding belongs here, at the parse
+// boundary, so every consumer of a Destination/advice section benefits.
+// ---------------------------------------------------------------------------
+
+// Accented Latin letters follow a regular naming scheme (&eacute; / &Eacute;),
+// so the uppercase half of the table is derived instead of typed out twice.
+const ACCENTED: Record<string, string> = {
+  agrave: 'à', aacute: 'á', acirc: 'â', atilde: 'ã', auml: 'ä', aring: 'å', aelig: 'æ',
+  ccedil: 'ç', egrave: 'è', eacute: 'é', ecirc: 'ê', euml: 'ë', igrave: 'ì', iacute: 'í',
+  icirc: 'î', iuml: 'ï', eth: 'ð', ntilde: 'ñ', ograve: 'ò', oacute: 'ó', ocirc: 'ô',
+  otilde: 'õ', ouml: 'ö', oslash: 'ø', ugrave: 'ù', uacute: 'ú', ucirc: 'û', uuml: 'ü',
+  yacute: 'ý', thorn: 'þ', yuml: 'ÿ', scaron: 'š', zcaron: 'ž', oelig: 'œ',
+};
+
+const ENTITIES: Record<string, string> = {
+  // Structural — these must stay literal text; see decodeEntities().
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'",
+  // Spaces.
+  nbsp: ' ', ensp: ' ', emsp: ' ', thinsp: ' ', shy: '',
+  // Punctuation.
+  ndash: '–', mdash: '—', horbar: '―', hellip: '…', bull: '•', middot: '·',
+  lsquo: '‘', rsquo: '’', sbquo: '‚', ldquo: '“', rdquo: '”', bdquo: '„',
+  laquo: '«', raquo: '»', lsaquo: '‹', rsaquo: '›', dagger: '†', Dagger: '‡',
+  sect: '§', para: '¶', iexcl: '¡', iquest: '¿',
+  // Currency — the reason this table exists.
+  yen: '¥', euro: '€', pound: '£', cent: '¢', curren: '¤',
+  // Maths / units, common in prices, hours and elevations.
+  deg: '°', plusmn: '±', times: '×', divide: '÷', minus: '−', frac12: '½',
+  frac14: '¼', frac34: '¾', sup1: '¹', sup2: '²', sup3: '³', micro: 'µ',
+  permil: '‰', prime: '′', Prime: '″', ne: '≠', le: '≤', ge: '≥', asymp: '≈',
+  // Symbols / arrows.
+  copy: '©', reg: '®', trade: '™', larr: '←', rarr: '→', harr: '↔', uarr: '↑', darr: '↓',
+  ...ACCENTED,
+};
+for (const [name, char] of Object.entries(ACCENTED)) {
+  ENTITIES[name[0].toUpperCase() + name.slice(1)] = char.toUpperCase();
+}
+
+const ENTITY_RE = /&(#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[a-zA-Z][a-zA-Z0-9]{1,30});/g;
+
+/**
+ * Decode HTML character references in text that is rendered as TEXT, never as
+ * markup (React escapes it on the way out). Deliberately a SINGLE pass: decoding
+ * repeatedly would turn a literal "&amp;lt;script&gt;" into a tag and hand an
+ * XSS primitive to any future consumer that did use innerHTML.
+ */
+export function decodeEntities(input: string): string {
+  if (!input.includes('&')) return input;
+  return input.replace(ENTITY_RE, (match, body: string) => {
+    if (body[0] === '#') {
+      const code = Number.parseInt(body.slice(body[1] === 'x' || body[1] === 'X' ? 2 : 1), body[1] === 'x' || body[1] === 'X' ? 16 : 10);
+      // Reject anything that isn't a real, printable scalar value: NUL and other
+      // C0 controls, lone surrogates, and out-of-range code points.
+      if (!Number.isFinite(code) || code < 0x20 || code > 0x10ffff) return match;
+      if (code >= 0xd800 && code <= 0xdfff) return match;
+      return String.fromCodePoint(code);
+    }
+    return ENTITIES[body] ?? match; // unknown name → leave the source text alone
+  });
+}
+
+/** Wikitext → display text, with character references resolved. */
+function cleanText(input?: string): string {
+  // Decode AFTER cleanWikitext has stripped tags: doing it first would let an
+  // escaped "&lt;b&gt;" become a real tag that the stripper then eats, silently
+  // deleting the words around it.
+  return decodeEntities(cleanWikitext(input ?? ''));
+}
+
 /** Wikivoyage POI listing template names. */
 const LISTING_NAMES = new Set([
   'see',
@@ -121,7 +196,7 @@ const NAV_TYPES = new Set(['city', 'region', 'vicinity', 'country', 'continent',
 
 function toDestination(tpl: ParsedTemplate, index: number): Destination | null {
   const p = tpl.params;
-  const name = cleanWikitext(p.name ?? p['1'] ?? '').trim();
+  const name = cleanText(p.name ?? p['1']).trim();
   if (!name) return null;
 
   const wvType = (tpl.name === 'listing' || tpl.name === 'marker' || tpl.name === 'vcard'
@@ -131,7 +206,7 @@ function toDestination(tpl: ParsedTemplate, index: number): Destination | null {
 
   if (NAV_TYPES.has(wvType)) return null; // skip navigational markers
 
-  const description = cleanWikitext(p.content ?? p.description ?? '');
+  const description = cleanText(p.content ?? p.description);
   const category = classifyCategory(wvType, name, description);
 
   return {
@@ -142,11 +217,11 @@ function toDestination(tpl: ParsedTemplate, index: number): Destination | null {
     lat: parseCoord(p.lat ?? p.latitude),
     lon: parseCoord(p.long ?? p.lon ?? p.longitude),
     description: description || undefined,
-    address: cleanWikitext(p.address ?? '') || undefined,
+    address: cleanText(p.address) || undefined,
     url: (p.url ?? p.website ?? '').trim() || undefined,
-    phone: cleanWikitext(p.phone ?? '') || undefined,
-    hours: cleanWikitext(p.hours ?? '') || undefined,
-    price: cleanWikitext(p.price ?? '') || undefined,
+    phone: cleanText(p.phone) || undefined,
+    hours: cleanText(p.hours) || undefined,
+    price: cleanText(p.price) || undefined,
     wikidata: (p.wikidata ?? '').trim() || undefined,
     image: buildImageUrl(p.image),
     score: 0,
@@ -173,7 +248,7 @@ function buildAdvice(sections: Record<string, string>): AdviceSection[] {
   for (const spec of ADVICE_SECTIONS) {
     const key = spec.keys.find((k) => sections[k]);
     if (!key) continue;
-    const body = cleanWikitext(sections[key]);
+    const body = cleanText(sections[key]);
     if (body.length < 40) continue; // skip near-empty sections
     out.push({ id: spec.title.toLowerCase().replace(/\s+/g, '-'), title: spec.title, icon: spec.icon, body });
   }
@@ -458,7 +533,7 @@ export async function getGuide(query: string): Promise<Guide> {
 
   return {
     title,
-    intro: cleanWikitext(intro),
+    intro: cleanText(intro),
     advice: buildAdvice(sections),
     destinations: ranked,
     center,

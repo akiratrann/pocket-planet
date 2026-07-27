@@ -1,0 +1,115 @@
+/* ---------- Place photo slot ---------- */
+/* Photo coverage is partial and always will be: a guide is assembled from
+   sources that simply don't picture every listing. So the slot is built around
+   the ABSENCE of a photo rather than treating it as a failure — a category tile
+   is always painted, and the photo (when there is one) sits on top of it.
+
+   That single structure buys three things at once:
+     - no photo        -> a deliberate tile, not a broken-image glyph
+     - 404 / hotlink   -> the tile is already behind the image, so onError just
+                          drops the <img> and nothing moves
+     - slow network    -> the tile occupies the exact final box from first
+                          paint, so a late photo can never shift the layout
+   The tile is a heavily diluted wash of the category colour, not the solid fill
+   used in the itinerary rail: a list is mostly real photographs and the
+   placeholders have to sit quietly beside them. */
+
+.pphoto {
+  position: relative;
+  overflow: hidden;
+  flex-shrink: 0;
+  /* Flat fallback first, for engines without color-mix(). */
+  background: #f4f1ec;
+  background: color-mix(in srgb, var(--pp-tint, #8a8178) 8%, var(--panel-bg));
+  border: 1px solid var(--line);
+  border-color: color-mix(in srgb, var(--pp-tint, #8a8178) 18%, var(--line));
+}
+
+.pphoto--card {
+  width: 78px;
+  height: 78px;
+  border-radius: 10px;
+  /* The card's full-bleed hit layer is z-index 1 and sits behind everything the
+     user actually looks at; the slot has to clear it and stay click-through so
+     the whole card still selects the place. */
+  z-index: 2;
+  pointer-events: none;
+}
+
+.pphoto--hero {
+  width: 100%;
+  height: 190px;
+  border-radius: 12px;
+  margin-bottom: 8px;
+}
+
+/* The tile. Sits under the photo, so it is also what shows while one loads. */
+.pphoto__tile {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  /* A faint diagonal sheen keeps a large empty hero from reading as a dead
+     grey rectangle without adding any colour of its own. */
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0));
+}
+
+.pphoto__icon {
+  line-height: 1;
+  /* Desaturated and half-transparent: the icon is a hint at what the place is,
+     never a graphic that pulls the eye away from the real photo next to it. */
+  opacity: 0.42;
+  filter: saturate(0.75);
+}
+
+.pphoto--card .pphoto__icon {
+  font-size: 26px;
+}
+
+.pphoto--hero .pphoto__icon {
+  font-size: 40px;
+}
+
+.pphoto__label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--ink-soft);
+  color: color-mix(in srgb, var(--pp-tint, #8a8178) 35%, var(--ink-soft));
+  opacity: 0.85;
+}
+
+.pphoto__img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  /* Arrives as a settle, not a flash. Kept short, and the tile fades out on the
+     same curve, so the icon is never visible ghosting through the photo. */
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+
+.pphoto--ready .pphoto__img {
+  opacity: 1;
+}
+
+.pphoto__tile {
+  transition: opacity 0.18s ease;
+}
+
+.pphoto--ready .pphoto__tile {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pphoto__img,
+  .pphoto__tile {
+    transition: none;
+  }
+}

@@ -4,40 +4,62 @@ import {
   Marker,
   NavigationControl,
   AttributionControl,
+  setWorkerUrl,
 } from 'maplibre-gl';
-import type { StyleSpecification } from 'maplibre-gl';
+import type { ExpressionSpecification } from 'maplibre-gl';
+import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import type { Destination, Guide } from '../types';
 import { CATEGORY_MAP } from '../data/categories';
 import { reverseGeocode } from '../data/geocode';
 import { translate } from '../i18n';
 
-// Clean, no-API-key raster basemap (CARTO Voyager over OpenStreetMap data).
+// maplibre derives its worker URL from `new URL(`./${name}`, import.meta.url)`.
+// The interpolated name defeats the bundler's static analysis, so the worker is
+// never emitted and the production build resolves it to /assets/maplibre-gl-
+// worker.mjs — which the SPA fallback answers with index.html. The worker then
+// dies silently, and since ONLY vector tiles and glyphs are fetched off-thread,
+// the symptom is a map that loads style.json, TileJSON and sprites and then
+// renders nothing. Raster basemaps hid this because they load on the main
+// thread. `?worker&url` makes Vite bundle the worker and hand back its real
+// hashed URL.
+setWorkerUrl(maplibreWorkerUrl);
+
+// Vector basemap, no API key. It has to be vector: the previous CARTO *raster*
+// basemap bakes place names into the PNGs, so "大阪市" over Osaka could not be
+// translated client-side at any price. With vector tiles the names are feature
+// properties and `forceEnglishLabels` below can pick which one to draw.
 //
-// NOTE: an attempt to move to CARTO's vector style (so labels could be forced to
-// English — raster tiles have place names burned into the PNGs) rendered a blank
-// map: maplibre-gl v6 fetched style.json, tiles.json and the sprite, then never
-// requested a single vector tile or glyph. Direct fetches of those URLs return
-// 200, so it is a style/version incompatibility rather than the network.
-// Reverted deliberately — a working map beats localized labels. Localizing
-// labels still requires vector tiles; a different provider (OpenFreeMap,
-// MapTiler) is the next thing to try.
-const MAP_STYLE: StyleSpecification = {
-  version: 8,
-  sources: {
-    basemap: {
-      type: 'raster',
-      tiles: [
-        'https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-        'https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-        'https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-      ],
-      tileSize: 256,
-      attribution:
-        '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>',
-    },
-  },
-  layers: [{ id: 'basemap', type: 'raster', source: 'basemap' }],
-};
+// OpenFreeMap serves OpenMapTiles-schema tiles whose features carry a full set
+// of `name:<lang>` properties, which is exactly what the English rewrite needs.
+// Attribution (OpenFreeMap / OpenMapTiles / OpenStreetMap) rides along in the
+// source TileJSON, so the AttributionControl below picks it up on its own.
+const MAP_STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty';
+
+// Liberty's own labels are "latin\nnonlatin" stacks (`OYODONAKA 2-CHOME` over
+// `大淀中二丁目`). Prefer the real English name, then OpenMapTiles' Latin
+// transliteration, and only fall back to the local-script name when a feature
+// has neither — which also keeps us off unshaped RTL text in most of the world,
+// since we ship no RTL text plugin.
+const ENGLISH_LABEL = [
+  'coalesce',
+  ['get', 'name:en'],
+  ['get', 'name:latin'],
+  ['get', 'name'],
+] as unknown as ExpressionSpecification;
+
+/**
+ * Repoint every name-bearing symbol layer at the English label expression.
+ * Layers keyed off `ref` (motorway shields) are left alone — a road number is
+ * already language-neutral, and rewriting it would blank the shields.
+ */
+function forceEnglishLabels(map: MaplibreMap) {
+  for (const layer of map.getStyle().layers) {
+    if (layer.type !== 'symbol') continue;
+    const field = layer.layout?.['text-field'];
+    if (field == null || !JSON.stringify(field).includes('name')) continue;
+    map.setLayoutProperty(layer.id, 'text-field', ENGLISH_LABEL);
+  }
+}
 
 interface Props {
   guide?: Guide;
@@ -143,6 +165,8 @@ export default function MapView({
   frameOnLoadRef.current = frameOnLoad;
   const itineraryOrderRef = useRef(itineraryOrder);
   itineraryOrderRef.current = itineraryOrder;
+  const hoveredRef = useRef(hoveredId);
+  hoveredRef.current = hoveredId;
 
   destRef.current = destinations;
   guideRef.current = guide;
@@ -176,11 +200,15 @@ export default function MapView({
     const chosen = trip
       ? destRef.current.filter((d) => d.lat != null && d.lon != null && trip.has(d.id))
       : inView.slice(0, cap);
-    // Always keep the selected pin on the map.
-    const sel = selectedRef.current;
-    if (sel && !chosen.some((d) => d.id === sel)) {
-      const s = destRef.current.find((d) => d.id === sel);
-      if (s?.lat != null && s?.lon != null) chosen.push(s);
+    // Always keep the selected pin on the map — and the hovered one. Pins are
+    // culled by zoom/score/viewport, so hovering a low-ranked place in the list
+    // used to highlight nothing at all: the marker it wanted simply wasn't
+    // rendered. Forcing it in makes hover answer "where is this?", which is the
+    // whole point of the interaction.
+    for (const id of [selectedRef.current, hoveredRef.current]) {
+      if (!id || chosen.some((d) => d.id === id)) continue;
+      const extra = destRef.current.find((d) => d.id === id);
+      if (extra?.lat != null && extra?.lon != null) chosen.push(extra);
     }
     const wanted = new Set(chosen.map((d) => d.id));
 
@@ -267,13 +295,16 @@ export default function MapView({
     if (!containerRef.current || mapRef.current) return;
     const map = new MaplibreMap({
       container: containerRef.current,
-      style: MAP_STYLE,
+      style: MAP_STYLE_URL,
       center: [0, 20],
       zoom: 1.4,
       attributionControl: false,
     });
     map.addControl(new NavigationControl({ showCompass: false }), 'bottom-right');
     map.addControl(new AttributionControl({ compact: true }), 'bottom-left');
+    // `style.load` fires before the first symbol layout, so labels are drawn in
+    // English from the very first frame rather than flashing local script.
+    map.on('style.load', () => forceEnglishLabels(map));
     map.on('load', () => {
       loadedRef.current = true;
       renderMarkers();
@@ -344,12 +375,15 @@ export default function MapView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [destinations, selectedId, allCategories, itineraryOrder]);
 
-  // Highlight the hovered destination's pin (list -> map sync).
+  // Highlight the hovered destination's pin (list -> map sync). Renders first,
+  // so a pin that was culled exists by the time we go to highlight it.
   useEffect(() => {
+    if (loadedRef.current) renderMarkers();
     for (const [id, marker] of markersRef.current) {
       const pin = marker.getElement().firstElementChild;
       pin?.classList.toggle('map-pin--hover', id === hoveredId);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hoveredId]);
 
   // Pan to the selected destination.

@@ -4,53 +4,59 @@ import { useAppStore, savedFromDestination } from '../store/useAppStore';
 import { useI18n } from '../i18n';
 import type { CategoryId, Destination } from '../types';
 import PinButton from './PinButton';
+import { PlacePhoto, RankProvenance } from './DestinationDetail';
+import './provenance.css';
 
-function ScoreBadge({ score }: { score: number }) {
-  return (
-    <span className="scorebadge" title={`Recommendation score ${score}/100`}>
-      {score}
-    </span>
-  );
-}
-
-function DestinationCard({ d }: { d: Destination }) {
+function DestinationCard({
+  d,
+  showWhy,
+  onToggleWhy,
+}: {
+  d: Destination;
+  showWhy: boolean;
+  onToggleWhy: () => void;
+}) {
   const select = useAppStore((s) => s.select);
   const setHovered = useAppStore((s) => s.setHovered);
   const selectedId = useAppStore((s) => s.selectedId);
   const hoveredId = useAppStore((s) => s.hoveredId);
   const { t } = useI18n();
-  const [imgOk, setImgOk] = useState(true);
   const cat = CATEGORY_MAP[d.category];
   return (
-    <button
+    // The card was a <button>; the score badge is now a button too, so the card
+    // becomes a div with a full-bleed hit layer behind it (buttons can't nest).
+    <div
       className={
         'dcard' +
         (selectedId === d.id ? ' dcard--active' : '') +
         (hoveredId === d.id ? ' dcard--hover' : '')
       }
-      onClick={() => select(d.id)}
       onMouseEnter={() => setHovered(d.id)}
       onMouseLeave={() => setHovered(null)}
       style={{ ['--cat-color' as string]: cat.color }}
     >
+      <button className="dcard__hit" onClick={() => select(d.id)} aria-label={d.name} />
       <div className="dcard__rank" style={{ background: cat.color }}>
         #{d.rank}
       </div>
-      {d.image && imgOk ? (
-        <img
-          className="dcard__thumb"
-          src={d.image}
-          alt=""
-          loading="lazy"
-          onError={() => setImgOk(false)}
-        />
-      ) : (
-        <div className="dcard__thumb dcard__thumb--placeholder">{cat.icon}</div>
-      )}
+      {/* No label at this size — a 78px tile has no room for a caption, and the
+          category icon already says "we know what this is, we just have no
+          picture of it". */}
+      <PlacePhoto src={d.image} category={d.category} variant="card" />
       <div className="dcard__body">
         <div className="dcard__title">
           {d.name}
-          <ScoreBadge score={d.score} />
+          <button
+            className="scorebadge scorebadge--btn"
+            onClick={onToggleWhy}
+            aria-expanded={showWhy}
+            title={`${t('why_rank')} #${d.rank}?`}
+          >
+            {d.score}
+            <span className="scorebadge__cue" aria-hidden="true">
+              ⓘ
+            </span>
+          </button>
         </div>
         {d.description && <p className="dcard__desc">{d.description}</p>}
         <div className="dcard__meta">
@@ -60,7 +66,7 @@ function DestinationCard({ d }: { d: Destination }) {
           {d.price && <span className="dcard__meta-item">💰 {d.price}</span>}
         </div>
       </div>
-    </button>
+    </div>
   );
 }
 
@@ -73,6 +79,9 @@ export default function DestinationList({
 }) {
   const active = useAppStore((s) => s.activeCategories);
   const { t } = useI18n();
+  // Only one rank explanation is open at a time, so the list never turns into a
+  // wall of expanded panels.
+  const [whyId, setWhyId] = useState<string | null>(null);
 
   if (!destinations.length) {
     return (
@@ -101,8 +110,13 @@ export default function DestinationList({
             </h3>
             {items.map((d) => (
               <div key={d.id} className="dcard-wrap">
-                <DestinationCard d={d} />
+                <DestinationCard
+                  d={d}
+                  showWhy={whyId === d.id}
+                  onToggleWhy={() => setWhyId((cur) => (cur === d.id ? null : d.id))}
+                />
                 <PinButton place={savedFromDestination(d, location)} className="dcard__pin" />
+                {whyId === d.id && <RankProvenance d={d} location={location} />}
               </div>
             ))}
           </section>
