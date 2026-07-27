@@ -1,12 +1,20 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { CATEGORY_MAP } from '../data/categories';
-import { useAppStore } from '../store/useAppStore';
+import { useAppStore, savedFromDestination } from '../store/useAppStore';
+import { useI18n } from '../i18n';
 import type { Destination } from '../types';
 import FeedbackControls from './FeedbackControls';
+import PinButton from './PinButton';
 
 export default function DestinationDetail({ d, location }: { d: Destination; location: string }) {
   const select = useAppStore((s) => s.select);
+  const quickAddToItinerary = useAppStore((s) => s.quickAddToItinerary);
+  const { t } = useI18n();
   const cat = CATEGORY_MAP[d.category];
+
+  const [added, setAdded] = useState(false);
+  // Reset the "Added ✓" confirmation whenever we view a different place.
+  useEffect(() => setAdded(false), [d.id]);
 
   // Build the gallery: `images` when present, else the single `image`.
   const photos = (d.images && d.images.length ? d.images : d.image ? [d.image] : []).filter(Boolean);
@@ -18,7 +26,7 @@ export default function DestinationDetail({ d, location }: { d: Destination; loc
   return (
     <div className="detail">
       <button className="detail__back" onClick={() => select(null)}>
-        ← Back to list
+        {t('back_to_list')}
       </button>
       {activeSrc && (
         <img
@@ -52,10 +60,10 @@ export default function DestinationDetail({ d, location }: { d: Destination; loc
       )}
       <div className="detail__head">
         <span className="detail__cat" style={{ background: cat.color }}>
-          {cat.icon} {cat.label}
+          {cat.icon} {t('cat_' + d.category)}
         </span>
         <span className="detail__rank">
-          #{d.rank} most recommended · {d.score}/100
+          #{d.rank} {t('most_recommended')} · {d.score}/100
         </span>
       </div>
       <h2 className="detail__title">{d.name}</h2>
@@ -73,34 +81,44 @@ export default function DestinationDetail({ d, location }: { d: Destination; loc
       <dl className="detail__facts">
         {d.address && (
           <div>
-            <dt>📍 Address</dt>
+            <dt>📍 {t('address')}</dt>
             <dd>{d.address}</dd>
           </div>
         )}
         {d.hours && (
           <div>
-            <dt>🕑 Hours</dt>
+            <dt>🕑 {t('hours')}</dt>
             <dd>{d.hours}</dd>
           </div>
         )}
         {d.price && (
           <div>
-            <dt>💰 Price</dt>
+            <dt>💰 {t('price')}</dt>
             <dd>{d.price}</dd>
           </div>
         )}
         {d.phone && (
           <div>
-            <dt>📞 Phone</dt>
+            <dt>📞 {t('phone')}</dt>
             <dd>{d.phone}</dd>
           </div>
         )}
       </dl>
 
       <div className="detail__actions">
+        <button
+          className={'btn' + (added ? ' btn--done' : '')}
+          onClick={() => {
+            quickAddToItinerary(savedFromDestination(d, location));
+            setAdded(true);
+          }}
+        >
+          {added ? `✓ ${t('added')}` : `🧳 ${t('add_to_itinerary')}`}
+        </button>
+        <PinButton place={savedFromDestination(d, location)} className="btn btn--ghost pinbtn--wide" withLabel />
         {d.url && (
           <a className="btn" href={d.url} target="_blank" rel="noreferrer">
-            🌐 Website
+            🌐 {t('website')}
           </a>
         )}
         {d.lat != null && d.lon != null && (
@@ -110,7 +128,7 @@ export default function DestinationDetail({ d, location }: { d: Destination; loc
             target="_blank"
             rel="noreferrer"
           >
-            🧭 Open in map
+            🧭 {t('open_in_map')}
           </a>
         )}
       </div>

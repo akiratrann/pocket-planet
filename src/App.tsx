@@ -7,8 +7,12 @@ import DestinationList from './components/DestinationList';
 import DestinationDetail from './components/DestinationDetail';
 import AdvicePanel from './components/AdvicePanel';
 import LearningPanel from './components/LearningPanel';
+import ItineraryPanel from './components/ItineraryPanel';
+import LanguageSelector from './components/LanguageSelector';
+import ChatWidget from './components/ChatWidget';
 import { useGuide } from './hooks/useGuide';
 import { useAppStore } from './store/useAppStore';
+import { useI18n } from './i18n';
 import { CATEGORIES } from './data/categories';
 import type { CategoryId } from './types';
 
@@ -35,7 +39,8 @@ function useIsMobile() {
 
 export default function App() {
   const query = useAppStore((s) => s.query);
-  const setQuery = useAppStore((s) => s.setQuery);
+  const exploreTo = useAppStore((s) => s.exploreTo);
+  const frameOnLoad = useAppStore((s) => s.frameOnLoad);
   const active = useAppStore((s) => s.activeCategories);
   const selectedId = useAppStore((s) => s.selectedId);
   const hoveredId = useAppStore((s) => s.hoveredId);
@@ -44,6 +49,13 @@ export default function App() {
   const setPanelTab = useAppStore((s) => s.setPanelTab);
   const panelOpen = useAppStore((s) => s.panelOpen);
   const setPanelOpen = useAppStore((s) => s.setPanelOpen);
+  const { t, lang, dir } = useI18n();
+
+  // Reflect language + direction on the document for correct RTL rendering.
+  useEffect(() => {
+    document.documentElement.lang = lang;
+    document.documentElement.dir = dir;
+  }, [lang, dir]);
 
   const isMobile = useIsMobile();
   const [autoExplore, setAutoExplore] = useState(true);
@@ -56,7 +68,7 @@ export default function App() {
   const [dragging, setDragging] = useState(false);
   const panelRef = useRef<HTMLElement>(null);
 
-  const { data: guide, isLoading, isError, error } = useGuide(query);
+  const { data: guide, isLoading, isError, error } = useGuide(query, lang);
 
   const counts = useMemo(() => {
     const c = Object.fromEntries(CATEGORIES.map((cat) => [cat.id, 0])) as Record<CategoryId, number>;
@@ -128,9 +140,11 @@ export default function App() {
         hoveredId={hoveredId}
         onSelect={select}
         autoExplore={autoExplore}
-        onExplore={(place) => setQuery(place)}
+        onExplore={(place) => exploreTo(place)}
         onExploringChange={setExploring}
         allCategories={active.size === 0}
+        frameOnLoad={frameOnLoad}
+        lang={lang}
       />
 
       <div className="map-controls">
@@ -139,9 +153,9 @@ export default function App() {
           onClick={() => setAutoExplore((v) => !v)}
           title="Automatically load places as you pan and zoom the world"
         >
-          🌍 Explore as I move: {autoExplore ? 'On' : 'Off'}
+          🌍 {t('explore_move')}: {autoExplore ? t('on') : t('off')}
         </button>
-        {exploring && autoExplore && <div className="explore-toast">Loading {exploring}…</div>}
+        {exploring && autoExplore && <div className="explore-toast">{exploring}…</div>}
       </div>
 
       <header className="topbar">
@@ -150,6 +164,7 @@ export default function App() {
           <span className="brand__name">Pocket&nbsp;Planet</span>
         </div>
         <SearchBar isLoading={isLoading} />
+        <LanguageSelector />
       </header>
 
       {collapsed && (
@@ -173,7 +188,11 @@ export default function App() {
           <div className="panel__titlebar">
             <h1 className="panel__place">
               <span className="panel__place-name">{guide ? guide.title : query}</span>
-              {guide && <span className="panel__place-count">{guide.destinations.length} places</span>}
+              {guide && (
+                <span className="panel__place-count">
+                  {guide.destinations.length} {t('places')}
+                </span>
+              )}
             </h1>
             <button className="panel__close" onClick={closePanel} aria-label="Close panel" title="Close">
               ✕
@@ -184,19 +203,25 @@ export default function App() {
               className={'tab' + (panelTab === 'explore' ? ' tab--on' : '')}
               onClick={() => setPanelTab('explore')}
             >
-              🗺️ Explore
+              🗺️ {t('tab_explore')}
             </button>
             <button
               className={'tab' + (panelTab === 'advice' ? ' tab--on' : '')}
               onClick={() => setPanelTab('advice')}
             >
-              💡 Advice
+              💡 {t('tab_advice')}
+            </button>
+            <button
+              className={'tab' + (panelTab === 'itinerary' ? ' tab--on' : '')}
+              onClick={() => setPanelTab('itinerary')}
+            >
+              🧳 {t('tab_itinerary')}
             </button>
             <button
               className={'tab' + (panelTab === 'learn' ? ' tab--on' : '')}
               onClick={() => setPanelTab('learn')}
             >
-              🧠 Learn
+              🧠 {t('tab_learn')}
             </button>
           </div>
         </div>
@@ -205,16 +230,18 @@ export default function App() {
           {isLoading && (
             <div className="status">
               <div className="spinner" />
-              <p>Building your guide to “{query}”…</p>
+              <p>
+                {t('building_guide')} “{query}”…
+              </p>
             </div>
           )}
 
           {isError && (
             <div className="status status--error">
-              <p>Couldn’t build a guide for “{query}”.</p>
-              <p className="status__hint">
-                {(error as Error)?.message ?? 'Try a different or more specific place name.'}
+              <p>
+                {t('error_title')} “{query}”.
               </p>
+              <p className="status__hint">{(error as Error)?.message ?? t('error_hint')}</p>
             </div>
           )}
 
@@ -228,10 +255,11 @@ export default function App() {
                     <div className="panel__sticky">
                       <CategoryBar counts={counts} />
                     </div>
-                    <DestinationList destinations={visibleDestinations} />
+                    <DestinationList destinations={visibleDestinations} location={guide.title} />
                   </>
                 ))}
               {panelTab === 'advice' && <AdvicePanel guide={guide} />}
+              {panelTab === 'itinerary' && <ItineraryPanel guide={guide} />}
               {panelTab === 'learn' && <LearningPanel guide={guide} />}
             </>
           )}
@@ -247,6 +275,8 @@ export default function App() {
           />
         )}
       </aside>
+
+      <ChatWidget guide={guide} />
     </div>
   );
 }

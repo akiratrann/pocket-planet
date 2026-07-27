@@ -6,6 +6,9 @@
 import { getLLM } from '../llm/adapter.ts';
 import { store, type KbSource } from '../store.ts';
 import { guideLanguages } from './lang.ts';
+import { fetchDiscussions } from './discussions.ts';
+import { ingestLonelyPlanet } from './lonelyplanet.ts';
+import { ingestYouTube } from './youtube.ts';
 
 const UA = 'PocketPlanet/1.0 (https://github.com/akiratrann/pocket-planet)';
 
@@ -171,12 +174,43 @@ export async function ingestLocationAuto(location: string): Promise<KbSource | n
   return primary;
 }
 
+/**
+ * Study community discussion platforms (Reddit, Travel Stack Exchange…) for a
+ * location and store each thread as a source. The raw thread text (question +
+ * top answers/comments) is kept so the opinion miner can quote real travellers,
+ * and so the ranking "buzz" signal can see which places people actually mention.
+ */
+export async function ingestDiscussions(location: string): Promise<KbSource[]> {
+  const threads = await fetchDiscussions(location);
+  const saved: KbSource[] = [];
+  for (const th of threads) {
+    const src: KbSource = {
+      id: `disc-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      location,
+      url: th.url,
+      title: `${th.title} — ${th.platform}`,
+      fetchedAt: Date.now(),
+      // Keep the real discussion text as the "summary" so opinions/buzz work off
+      // actual traveller words (not an LLM paraphrase).
+      summary: th.text,
+      pois: [],
+      provider: th.platform,
+    };
+    await store.addSource(src);
+    saved.push(src);
+  }
+  return saved;
+}
+
 /** Re-study every tracked location (used by the scheduler). */
 export async function ingestAllTracked(): Promise<number> {
   const tracked = await store.getTracked();
   let count = 0;
   for (const loc of tracked) {
     const src = await ingestLocationAuto(loc);
+    await ingestDiscussions(loc); // refresh community discussion each cycle
+    await ingestLonelyPlanet(loc).catch(() => []); // refresh Lonely Planet articles
+    await ingestYouTube(loc).catch(() => null); // refresh YouTube travel videos
     if (src) count++;
   }
   return count;

@@ -129,6 +129,9 @@ export function applyLearning(
   guide: Guide,
   state: LearnedState,
   extras: Destination[] = [],
+  /** Per-request community "buzz" boosts (normalizedName -> points), from real
+   *  online discussions. Not part of persistent learned state. */
+  buzz: Record<string, number> = {},
 ): Guide {
   const merged = [...guide.destinations, ...extras];
 
@@ -146,6 +149,7 @@ export function applyLearning(
     weights: state.weights,
     overrides: state.overrides,
     prominenceKeywords: state.prominenceKeywords,
+    buzz,
   });
 
   const { center, bbox } = computeExtent(ranked);

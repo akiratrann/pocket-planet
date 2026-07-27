@@ -9,6 +9,7 @@ import {
 import type { Destination, Guide } from '../types';
 import { CATEGORY_MAP } from '../data/categories';
 import { reverseGeocode } from '../data/geocode';
+import { translate } from '../i18n';
 
 // Clean, no-API-key raster basemap (CARTO Voyager over OpenStreetMap data).
 const MAP_STYLE: StyleSpecification = {
@@ -41,6 +42,10 @@ interface Props {
   onExploringChange: (label: string | null) => void;
   /** True when no category filter is active — keep the map uncluttered. */
   allCategories: boolean;
+  /** Whether to frame the camera to a newly loaded guide (searches yes, zoom-explore no). */
+  frameOnLoad: boolean;
+  /** UI language, for localized region labels + marker tooltips. */
+  lang: string;
 }
 
 /** With no category filter, show just the top highlights so the map isn't cramped. */
@@ -57,7 +62,7 @@ function capForZoom(zoom: number): number {
   return 100000;
 }
 
-function markerElement(d: Destination, selected: boolean): HTMLElement {
+function markerElement(d: Destination, selected: boolean, lang: string): HTMLElement {
   const cat = CATEGORY_MAP[d.category];
   // Wrapper is positioned by MapLibre; the inner pin owns all visual transforms,
   // so our CSS can never fight MapLibre's absolute positioning.
@@ -66,7 +71,7 @@ function markerElement(d: Destination, selected: boolean): HTMLElement {
   const el = document.createElement('button');
   el.className = 'map-pin' + (selected ? ' map-pin--selected' : '');
   el.style.setProperty('--pin-color', cat.color);
-  el.title = `${d.name} · #${d.rank} in ${cat.label}`;
+  el.title = `${d.name} · #${d.rank} · ${translate(lang, 'cat_' + d.category)}`;
   el.innerHTML = `<span class="map-pin__glyph">${cat.icon}</span>`;
   if (d.rank <= 3) el.innerHTML += `<span class="map-pin__rank">${d.rank}</span>`;
   wrap.appendChild(el);
@@ -83,6 +88,8 @@ export default function MapView({
   onExplore,
   onExploringChange,
   allCategories,
+  frameOnLoad,
+  lang,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MaplibreMap | null>(null);
@@ -98,9 +105,12 @@ export default function MapView({
   const onExploreRef = useRef(onExplore);
   const onExploringChangeRef = useRef(onExploringChange);
   const allCategoriesRef = useRef(allCategories);
+  const langRef = useRef(lang);
   const lastExploredRef = useRef<string>('');
   const suppressUntilRef = useRef<number>(0);
   const exploreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const frameOnLoadRef = useRef(frameOnLoad);
+  frameOnLoadRef.current = frameOnLoad;
 
   destRef.current = destinations;
   guideRef.current = guide;
@@ -110,6 +120,7 @@ export default function MapView({
   onExploreRef.current = onExplore;
   onExploringChangeRef.current = onExploringChange;
   allCategoriesRef.current = allCategories;
+  langRef.current = lang;
 
   /** Render only the pins that belong in the current viewport + zoom budget. */
   const renderMarkers = () => {
@@ -144,7 +155,7 @@ export default function MapView({
     }
     for (const d of chosen) {
       if (markers.has(d.id)) continue;
-      const el = markerElement(d, d.id === selectedRef.current);
+      const el = markerElement(d, d.id === selectedRef.current, langRef.current);
       el.addEventListener('click', (e) => {
         e.stopPropagation();
         onSelectRef.current?.(d.id);
@@ -199,7 +210,7 @@ export default function MapView({
     if (exploreTimerRef.current) clearTimeout(exploreTimerRef.current);
     exploreTimerRef.current = setTimeout(async () => {
       const c = map.getCenter();
-      const place = await reverseGeocode(c.lat, c.lng, map.getZoom());
+      const place = await reverseGeocode(c.lat, c.lng, map.getZoom(), langRef.current);
       if (!place) return;
       const key = place.name.trim().toLowerCase();
       if (key === lastExploredRef.current || key === guideRef.current?.title.toLowerCase()) return;
@@ -227,8 +238,9 @@ export default function MapView({
     });
     map.on('moveend', () => {
       renderMarkers();
-      // Zooming out climbs to the parent region; roaming to empty space loads
-      // whatever place is there. Drill-up takes priority when both could apply.
+      // Google-Maps style: as you zoom/pan, guess the region under the view and
+      // surface its places. These loads NEVER move the camera (see the guide
+      // effect) — zooming in/out just fills in the region, it doesn't drag you.
       if (!maybeDrillUp()) maybeAutoExplore();
     });
     mapRef.current = map;
@@ -244,21 +256,40 @@ export default function MapView({
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !guide) return;
-    // Suppress auto-explore during/just after the programmatic camera move.
-    suppressUntilRef.current = Date.now() + 2500;
     lastExploredRef.current = guide.title.trim().toLowerCase();
     onExploringChangeRef.current?.(null);
+
+    // Exploratory loads (zoom/pan "guess the region") must not move the camera —
+    // just let the new region's pins appear where the user is already looking.
+    if (!frameOnLoadRef.current) {
+      suppressUntilRef.current = Date.now() + 600;
+      renderMarkers();
+      return;
+    }
+
+    // Explicit search / navigation → frame the camera to the place.
+    suppressUntilRef.current = Date.now() + 2500;
     const apply = () => {
-      if (guide.bbox) {
+      const bb = guide.bbox;
+      // Guard against an implausibly large extent — a single stray/mislabelled
+      // coordinate can otherwise stretch the bbox across a continent and fling
+      // the camera thousands of km away (e.g. Vietnam → Central Asia).
+      const spanOk =
+        bb != null &&
+        bb[2] > bb[0] &&
+        bb[3] > bb[1] &&
+        bb[2] - bb[0] < 25 &&
+        bb[3] - bb[1] < 25;
+      if (spanOk) {
         map.fitBounds(
           [
-            [guide.bbox[0], guide.bbox[1]],
-            [guide.bbox[2], guide.bbox[3]],
+            [bb![0], bb![1]],
+            [bb![2], bb![3]],
           ],
           { padding: { top: 80, bottom: 80, left: 60, right: 60 }, maxZoom: 15, duration: 900 },
         );
       } else {
-        map.flyTo({ center: guide.center, zoom: 11, duration: 900 });
+        map.flyTo({ center: guide.center, zoom: 10, duration: 900 });
       }
     };
     if (loadedRef.current) apply();

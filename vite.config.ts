@@ -8,6 +8,8 @@ export default defineConfig({
   // through Vite's dep pre-bundler (which mis-handles the worker entry).
   optimizeDeps: { exclude: ['maplibre-gl'] },
   server: {
+    // Bind to all interfaces so you can open the app on your phone (same Wi-Fi).
+    host: true,
     proxy: {
       // Forward API calls to the backend "brain" during development.
       '/api': {

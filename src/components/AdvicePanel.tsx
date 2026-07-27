@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { Guide, LocationOpinions, Opinion } from '../types';
 import { useAppStore } from '../store/useAppStore';
+import { useI18n } from '../i18n';
 
 function OpinionList({ items, kind }: { items: Opinion[]; kind: 'pos' | 'neg' }) {
   return (
@@ -23,20 +24,21 @@ function OpinionList({ items, kind }: { items: Opinion[]; kind: 'pos' | 'neg' })
 }
 
 function TravellerOpinions({ opinions }: { opinions: LocationOpinions }) {
+  const { t } = useI18n();
   const { positives, negatives } = opinions;
   if (!positives.length && !negatives.length) return null;
   return (
     <section className="opinions">
-      <h4 className="opinions__title">What travellers say</h4>
+      <h4 className="opinions__title">{t('travellers_say')}</h4>
       {positives.length > 0 && (
         <div className="opinions__group">
-          <div className="opinions__head opinions__head--pos">👍 Praised for</div>
+          <div className="opinions__head opinions__head--pos">👍 {t('praised_for')}</div>
           <OpinionList items={positives} kind="pos" />
         </div>
       )}
       {negatives.length > 0 && (
         <div className="opinions__group">
-          <div className="opinions__head opinions__head--neg">👎 Common gripes</div>
+          <div className="opinions__head opinions__head--neg">👎 {t('common_gripes')}</div>
           <OpinionList items={negatives} kind="neg" />
         </div>
       )}
@@ -48,6 +50,7 @@ function TravellerOpinions({ opinions }: { opinions: LocationOpinions }) {
 export default function AdvicePanel({ guide }: { guide: Guide }) {
   const [open, setOpen] = useState<string | null>(guide.advice[0]?.id ?? null);
   const opinions = guide.meta?.opinions;
+  const { t } = useI18n();
 
   return (
     <div className="advice">
@@ -55,9 +58,7 @@ export default function AdvicePanel({ guide }: { guide: Guide }) {
 
       {opinions && <TravellerOpinions opinions={opinions} />}
 
-      {guide.advice.length === 0 && (
-        <p className="empty">No detailed travel advice is available for this place yet.</p>
-      )}
+      {guide.advice.length === 0 && <p className="empty">{t('no_advice')}</p>}
 
       {guide.advice.map((section) => {
         const isOpen = open === section.id;
@@ -79,7 +80,7 @@ export default function AdvicePanel({ guide }: { guide: Guide }) {
 
       {guide.related.length > 0 && (
         <div className="advice__related">
-          <h4>Explore nearby</h4>
+          <h4>{t('explore_nearby')}</h4>
           <RelatedLinks names={guide.related} />
         </div>
       )}
@@ -87,7 +88,7 @@ export default function AdvicePanel({ guide }: { guide: Guide }) {
       <p className="advice__attribution">
         {guide.attribution} ·{' '}
         <a href={guide.sourceUrl} target="_blank" rel="noreferrer">
-          View source
+          {t('view_source')}
         </a>
       </p>
     </div>

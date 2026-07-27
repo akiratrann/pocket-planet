@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
+import { useI18n } from '../i18n';
 
 const EXAMPLES = ['Kyoto', 'Portugal', 'Cusco', 'Marrakesh', 'Queenstown', 'Hoi An'];
 
 export default function SearchBar({ isLoading }: { isLoading: boolean }) {
   const query = useAppStore((s) => s.query);
   const setQuery = useAppStore((s) => s.setQuery);
+  const { t } = useI18n();
   const [text, setText] = useState(query);
 
   useEffect(() => setText(query), [query]);
@@ -29,10 +31,10 @@ export default function SearchBar({ isLoading }: { isLoading: boolean }) {
           className="searchbar__input"
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder="Search a city, country or town…"
+          placeholder={t('search_placeholder')}
           autoComplete="off"
           spellCheck={false}
-          aria-label="Search a destination"
+          aria-label={t('search_aria')}
         />
         {text && (
           <button

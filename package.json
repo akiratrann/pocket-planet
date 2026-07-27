@@ -8,11 +8,14 @@
     "server": "tsx watch server/index.ts",
     "dev:all": "concurrently -k -n web,api -c cyan,magenta \"npm:dev\" \"npm:server\"",
     "build": "tsc -b && vite build",
+    "start": "NODE_ENV=production tsx server/index.ts",
+    "prod": "npm run build && npm run start",
     "lint": "oxlint",
     "preview": "vite preview"
   },
   "dependencies": {
     "@fastify/cors": "^11.3.0",
+    "@fastify/static": "^10.1.2",
     "@tanstack/react-query": "^5.101.4",
     "fastify": "^5.10.0",
     "maplibre-gl": "^6.0.0",

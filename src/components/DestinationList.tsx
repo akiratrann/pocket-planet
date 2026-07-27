@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { CATEGORIES, CATEGORY_MAP } from '../data/categories';
-import { useAppStore } from '../store/useAppStore';
+import { useAppStore, savedFromDestination } from '../store/useAppStore';
+import { useI18n } from '../i18n';
 import type { CategoryId, Destination } from '../types';
+import PinButton from './PinButton';
 
 function ScoreBadge({ score }: { score: number }) {
   return (
@@ -16,6 +18,7 @@ function DestinationCard({ d }: { d: Destination }) {
   const setHovered = useAppStore((s) => s.setHovered);
   const selectedId = useAppStore((s) => s.selectedId);
   const hoveredId = useAppStore((s) => s.hoveredId);
+  const { t } = useI18n();
   const [imgOk, setImgOk] = useState(true);
   const cat = CATEGORY_MAP[d.category];
   return (
@@ -52,7 +55,7 @@ function DestinationCard({ d }: { d: Destination }) {
         {d.description && <p className="dcard__desc">{d.description}</p>}
         <div className="dcard__meta">
           <span className="dcard__tag" style={{ color: cat.color }}>
-            {cat.icon} {cat.label}
+            {cat.icon} {t('cat_' + d.category)}
           </span>
           {d.price && <span className="dcard__meta-item">💰 {d.price}</span>}
         </div>
@@ -61,13 +64,20 @@ function DestinationCard({ d }: { d: Destination }) {
   );
 }
 
-export default function DestinationList({ destinations }: { destinations: Destination[] }) {
+export default function DestinationList({
+  destinations,
+  location,
+}: {
+  destinations: Destination[];
+  location: string;
+}) {
   const active = useAppStore((s) => s.activeCategories);
+  const { t } = useI18n();
 
   if (!destinations.length) {
     return (
       <div className="empty">
-        <p>No destinations found for this filter.</p>
+        <p>{t('no_filter_results')}</p>
       </div>
     );
   }
@@ -86,11 +96,14 @@ export default function DestinationList({ destinations }: { destinations: Destin
         return (
           <section key={id} className="dlist__section">
             <h3 className="dlist__heading" style={{ borderColor: cat.color }}>
-              <span>{cat.icon} {cat.label}</span>
+              <span>{cat.icon} {t('cat_' + id)}</span>
               <span className="dlist__count">{items.length}</span>
             </h3>
             {items.map((d) => (
-              <DestinationCard key={d.id} d={d} />
+              <div key={d.id} className="dcard-wrap">
+                <DestinationCard d={d} />
+                <PinButton place={savedFromDestination(d, location)} className="dcard__pin" />
+              </div>
             ))}
           </section>
         );

@@ -20,7 +20,7 @@ const PER_SIDE_CAP = 6;
 // Logistics / admin chatter that isn't a traveller "opinion" about what to see,
 // even when it contains a sentiment word ("excellent railway", "expensive parking").
 const LOGISTICS =
-  /\b(shinkansen|railway|railroad|train|subway|metro|\bjr\b|\bbus(es)?\b|\bpass(es)?\b|parking|taxi|airport|ferry|dialect|visa|\batm\b|wi-?fi|sim card|rainy season|highway|\bfare(s)?\b|timetable|ticketing|check[- ]?in|itinerary)\b/i;
+  /\b(shinkansen|railway|railroad|train|subway|metro|\bjr\b|\bbus(es)?\b|\bpass(es)?\b|parking|taxi|airport|ferry|dialect|visa|\batm\b|wi-?fi|sim card|rainy season|highway|\bfare(s)?\b|timetable|ticketing|check[- ]?in|itinerary|platform|luggage|locker|stopover|refund|booking|reservation|excavation|\bpipe(s)?\b)\b/i;
 
 function normalize(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();

@@ -38,11 +38,12 @@ export async function reverseGeocode(
   lat: number,
   lon: number,
   mapZoom: number,
+  lang = 'en',
 ): Promise<ReverseResult | null> {
   const nz = nominatimZoom(mapZoom);
   const url =
     'https://nominatim.openstreetmap.org/reverse?format=jsonv2&addressdetails=1' +
-    `&lat=${lat}&lon=${lon}&zoom=${nz}`;
+    `&lat=${lat}&lon=${lon}&zoom=${nz}&accept-language=${encodeURIComponent(lang)}`;
   try {
     const res = await fetch(url, { headers: GEO_HEADERS });
     if (!res.ok) return null;

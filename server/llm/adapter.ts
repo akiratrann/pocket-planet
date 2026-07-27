@@ -29,11 +29,15 @@ export interface OpinionResult {
 
 export interface LLMClient {
   name: string;
+  /** True when a real generative model is available (enables free-form chat). */
+  generative: boolean;
   summarizeLocation(location: string, sourceText: string): Promise<string>;
   extractPOIs(location: string, sourceText: string): Promise<Destination[]>;
   proposeTuning(feedback: Feedback[], state: LearnedState): Promise<TuningProposal>;
   /** Pull key positive/negative points from REAL source text (no invention). */
   extractOpinions(location: string, sourceText: string): Promise<OpinionResult>;
+  /** Free-form conversational answer (only when `generative`). system + user → text. */
+  chat?(system: string, user: string): Promise<string>;
 }
 
 // Sentiment cue lexicons used by the heuristic miner (and as an LLM fallback).
@@ -122,6 +126,7 @@ function tokenize(name: string): string[] {
 
 const heuristic: LLMClient = {
   name: 'heuristic',
+  generative: false,
 
   async summarizeLocation(_location, sourceText) {
     const clean = sourceText.replace(/\s+/g, ' ').trim();
@@ -277,6 +282,10 @@ function makeChatClient(
 ): LLMClient {
   return {
     name,
+    generative: true,
+    async chat(system, user) {
+      return (await chat(system, user, false)).trim();
+    },
     async summarizeLocation(location, sourceText) {
       try {
         return await chat(

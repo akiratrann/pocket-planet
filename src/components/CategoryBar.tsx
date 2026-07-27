@@ -1,10 +1,12 @@
 import { CATEGORIES } from '../data/categories';
 import { useAppStore } from '../store/useAppStore';
+import { useI18n } from '../i18n';
 
 export default function CategoryBar({ counts }: { counts: Record<string, number> }) {
   const active = useAppStore((s) => s.activeCategories);
   const toggle = useAppStore((s) => s.toggleCategory);
   const clear = useAppStore((s) => s.clearCategories);
+  const { t } = useI18n();
   const allOn = active.size === 0;
 
   return (
@@ -18,7 +20,7 @@ export default function CategoryBar({ counts }: { counts: Record<string, number>
         <span className="chip__box" aria-hidden="true">
           {allOn ? '✓' : ''}
         </span>
-        All
+        {t('all')}
       </button>
 
       {CATEGORIES.map((c) => {
@@ -43,7 +45,7 @@ export default function CategoryBar({ counts }: { counts: Record<string, number>
             <span className="chip__box" aria-hidden="true">
               {on ? '✓' : ''}
             </span>
-            <span aria-hidden="true">{c.icon}</span> {c.label}
+            <span aria-hidden="true">{c.icon}</span> {t('cat_' + c.id)}
             <span className="chip__count">{count}</span>
           </label>
         );

@@ -96,6 +96,9 @@ export interface RankingLearning {
   overrides?: Record<string, number>;
   /** Extra "highlight" cues discovered by self-tuning. */
   prominenceKeywords?: string[];
+  /** normalizedName -> boost from how often the place is recommended in real
+   *  online discussions (Reddit, Travel Stack Exchange…). Grounded in mentions. */
+  buzz?: Record<string, number>;
 }
 
 /**
@@ -120,6 +123,7 @@ function rawScore(
   w: RankingWeights,
   prominenceRe: RegExp,
   overrides: Record<string, number>,
+  buzz: Record<string, number>,
 ): ScoredRaw {
   let score = w.base;
   const reasons: string[] = [];
@@ -167,6 +171,12 @@ function rawScore(
     reasons.push(override > 0 ? 'Boosted by traveller feedback' : 'Down-weighted by traveller feedback');
   }
 
+  const buzzBoost = buzz[normalizeName(d.name)];
+  if (buzzBoost) {
+    score += buzzBoost;
+    reasons.push('Recommended in trusted travel sources (Lonely Planet, Reddit, forums)');
+  }
+
   return { raw: Math.max(0, score), reasons };
 }
 
@@ -180,6 +190,7 @@ export function rankDestinations(
 ): Destination[] {
   const weights = learning.weights ?? RANKING_WEIGHTS;
   const overrides = learning.overrides ?? FEEDBACK_OVERRIDES;
+  const buzz = learning.buzz ?? {};
   const prominenceRe = buildProminenceRegex(learning.prominenceKeywords);
 
   // Track order within each category to reward editorial priority.
@@ -187,7 +198,7 @@ export function rankDestinations(
   const scored = destinations.map((d) => {
     const orderInCategory = seenPerCategory[d.category] ?? 0;
     seenPerCategory[d.category] = orderInCategory + 1;
-    const { raw, reasons } = rawScore(d, orderInCategory, weights, prominenceRe, overrides);
+    const { raw, reasons } = rawScore(d, orderInCategory, weights, prominenceRe, overrides, buzz);
     return { d, raw, reasons };
   });
 

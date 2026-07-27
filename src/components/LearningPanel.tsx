@@ -1,11 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { ingest, selfTune } from '../data/api';
+import { ingest, trainModel, trainStatus, type TrainStatus } from '../data/api';
 import type { Guide } from '../types';
 
 /**
  * The "brain" tab: shows what the system has learned for this place, lets you
- * feed it a new web resource to study, and lets you trigger a self-tuning pass.
+ * feed it a new web resource to study, and lets you train the ranking model on
+ * accumulated real-world signal (community buzz + your feedback).
  */
 export default function LearningPanel({ guide }: { guide: Guide }) {
   const qc = useQueryClient();
@@ -13,8 +14,16 @@ export default function LearningPanel({ guide }: { guide: Guide }) {
   const [url, setUrl] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [status, setStatus] = useState<TrainStatus | null>(null);
 
   const offline = !meta;
+
+  useEffect(() => {
+    if (offline) return;
+    trainStatus()
+      .then(setStatus)
+      .catch(() => setStatus(null));
+  }, [offline, meta?.learnedVersion]);
 
   async function study(withUrl?: string) {
     setBusy('study');
@@ -31,15 +40,16 @@ export default function LearningPanel({ guide }: { guide: Guide }) {
     }
   }
 
-  async function tune() {
-    setBusy('tune');
+  async function train() {
+    setBusy('train');
     setMsg(null);
     try {
-      const r = await selfTune();
-      setMsg(`Self-tuned to v${r.version}: ${r.rationale}`);
+      const r = await trainModel();
+      setMsg(`Trained to v${r.version}: ${r.rationale}`);
+      setStatus((s) => (s ? { ...s, last: r, learnedVersion: r.version } : s));
       qc.invalidateQueries({ queryKey: ['guide'] });
     } catch (e) {
-      setMsg(`Tuning failed: ${(e as Error).message}`);
+      setMsg(`Training failed: ${(e as Error).message}`);
     } finally {
       setBusy(null);
     }
@@ -105,14 +115,52 @@ export default function LearningPanel({ guide }: { guide: Guide }) {
       </div>
 
       <div className="learn__section">
-        <h4>🔧 Self-improve</h4>
+        <h4>🧠 Train the model</h4>
         <p className="learn__hint">
-          Review all feedback and update the global ranking + category rules so
-          every location benefits. (Runs automatically on a schedule too.)
+          The app records what makes places great — from community buzz (Reddit,
+          Travel Stack Exchange) and your feedback — then fits its ranking model
+          to that real signal so every location worldwide benefits. (Trains on a
+          schedule too.)
         </p>
-        <button className="btn" disabled={!!busy} onClick={tune}>
-          {busy === 'tune' ? 'Tuning…' : 'Run self-tuning now'}
+
+        {status && (
+          <div className="train__stats">
+            <div className="stat stat--sm">
+              <div className="stat__num">{status.examples.toLocaleString()}</div>
+              <div className="stat__label">Examples learned</div>
+            </div>
+            <div className="stat stat--sm">
+              <div className="stat__num">{status.last?.positives ?? 0}</div>
+              <div className="stat__label">Recommended</div>
+            </div>
+            <div className="stat stat--sm">
+              <div className="stat__num">
+                {status.last?.accuracy != null ? `${Math.round(status.last.accuracy * 100)}%` : '—'}
+              </div>
+              <div className="stat__label">Model fit</div>
+            </div>
+          </div>
+        )}
+
+        {status?.last?.weightChanges && status.last.weightChanges.length > 0 && (
+          <div className="train__weights">
+            <span className="train__weights-label">Last adjustments:</span>{' '}
+            {status.last.weightChanges.map((w) => (
+              <code key={w} className="train__chip">
+                {w}
+              </code>
+            ))}
+          </div>
+        )}
+
+        <button className="btn" disabled={!!busy} onClick={train}>
+          {busy === 'train' ? 'Training…' : '🧠 Train the model now'}
         </button>
+        {status?.last && (
+          <p className="learn__hint learn__hint--muted">
+            Last trained {new Date(status.last.at).toLocaleString()}.
+          </p>
+        )}
       </div>
 
       {meta.sources.length > 0 && (

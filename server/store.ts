@@ -28,6 +28,33 @@ export interface KbSource {
   provider: string; // which LLM (or 'heuristic') did the extraction
 }
 
+/**
+ * One training example: a place's feature vector plus the real-world "reward"
+ * it earned (community buzz + traveller feedback). Recorded as the app is used,
+ * so the ranking model can be trained on genuine signal.
+ */
+export interface TrainExample {
+  loc: string;
+  name: string;
+  f: number[]; // feature vector (see server/pipeline/train.ts FEATURES)
+  reward: number;
+  ts: number;
+}
+
+/** Summary of the most recent training pass (for display in the Learn tab). */
+export interface TrainingSummary {
+  at: number;
+  examples: number;
+  positives: number;
+  accuracy: number | null;
+  weightChanges: string[];
+  keywordsAdded: number;
+  rationale: string;
+  version: number;
+}
+
+const TRAIN_LOG_CAP = 5000;
+
 interface Db {
   learned: LearnedState;
   feedback: Feedback[];
@@ -38,6 +65,9 @@ interface Db {
    * An array holds the gallery (best first); null = looked up, none found.
    */
   images: Record<string, string[] | null>;
+  /** Recorded training examples + the last training pass summary. */
+  training: TrainExample[];
+  lastTraining: TrainingSummary | null;
 }
 
 const files = {
@@ -46,6 +76,8 @@ const files = {
   sources: join(DATA_DIR, 'sources.json'),
   tracked: join(DATA_DIR, 'tracked.json'),
   images: join(DATA_DIR, 'images.json'),
+  training: join(DATA_DIR, 'training.json'),
+  lastTraining: join(DATA_DIR, 'last-training.json'),
 };
 
 let cache: Db | null = null;
@@ -68,6 +100,8 @@ async function ensureLoaded(): Promise<Db> {
     sources: await readJson<KbSource[]>(files.sources, []),
     tracked: await readJson<string[]>(files.tracked, []),
     images: migrateImageCache(await readJson<Record<string, unknown>>(files.images, {})),
+    training: await readJson<TrainExample[]>(files.training, []),
+    lastTraining: await readJson<TrainingSummary | null>(files.lastTraining, null),
   };
   return cache;
 }
@@ -134,5 +168,27 @@ export const store = {
   },
   async saveImageCache(): Promise<void> {
     await persist('images');
+  },
+
+  async getTraining(): Promise<TrainExample[]> {
+    return (await ensureLoaded()).training;
+  },
+  /** Append examples, replacing any prior example for the same place (keep latest). */
+  async addTrainingExamples(examples: TrainExample[]): Promise<void> {
+    if (!examples.length) return;
+    const db = await ensureLoaded();
+    const key = (e: TrainExample) => `${e.loc.toLowerCase()}|${e.name.toLowerCase()}`;
+    const incoming = new Set(examples.map(key));
+    db.training = db.training.filter((e) => !incoming.has(key(e)));
+    db.training.push(...examples);
+    if (db.training.length > TRAIN_LOG_CAP) db.training = db.training.slice(-TRAIN_LOG_CAP);
+    await persist('training');
+  },
+  async getLastTraining(): Promise<TrainingSummary | null> {
+    return (await ensureLoaded()).lastTraining;
+  },
+  async setLastTraining(summary: TrainingSummary): Promise<void> {
+    (await ensureLoaded()).lastTraining = summary;
+    await persist('lastTraining');
   },
 };
