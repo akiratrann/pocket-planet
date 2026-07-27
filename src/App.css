@@ -2148,3 +2148,16 @@ a.opinions__src:hover {
 .status__dot--on {
   background: var(--accent);
 }
+
+/* MapLibre's zoom control is added at 'bottom-right' (MapView.tsx), which is
+   exactly where the chat button sits — the two overlapped, with the FAB
+   covering the zoom-out button. Lift the control group clear of it. Attribution
+   is bottom-left, so it is unaffected. */
+.maplibregl-ctrl-bottom-right {
+  bottom: 86px;
+}
+@media (max-width: 720px) {
+  .maplibregl-ctrl-bottom-right {
+    bottom: 74px;
+  }
+}
