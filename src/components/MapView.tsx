@@ -46,6 +46,8 @@ interface Props {
   frameOnLoad: boolean;
   /** UI language, for localized region labels + marker tooltips. */
   lang: string;
+  /** Directions line to draw, as [lon, lat] pairs. Null clears it. */
+  routeGeometry?: Array<[number, number]> | null;
 }
 
 /** With no category filter, show just the top highlights so the map isn't cramped. */
@@ -90,6 +92,7 @@ export default function MapView({
   allCategories,
   frameOnLoad,
   lang,
+  routeGeometry,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MaplibreMap | null>(null);
@@ -320,6 +323,77 @@ export default function MapView({
       map.flyTo({ center: [d.lon, d.lat], zoom: Math.max(map.getZoom(), 14), duration: 700 });
     }
   }, [selectedId, destinations]);
+
+  // Draw the directions line. The source and layer are created on first use and
+  // reused after that — swapping the GeoJSON data is far cheaper than removing
+  // and re-adding the layer on every route change.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !loadedRef.current) return;
+
+    const SRC = 'pp-route';
+    const LINE = 'pp-route-line';
+    const CASING = 'pp-route-casing';
+
+    // Typed locally rather than via the global GeoJSON namespace, which isn't
+    // in tsconfig.app.json's lib and fails the `tsc -b` build.
+    const data = {
+      type: 'Feature' as const,
+      properties: {},
+      geometry: {
+        type: 'LineString' as const,
+        coordinates: routeGeometry ?? [],
+      },
+    };
+
+    const existing = map.getSource(SRC) as
+      | { setData: (d: typeof data) => void }
+      | undefined;
+
+    if (existing) {
+      existing.setData(data);
+    } else {
+      map.addSource(SRC, { type: 'geojson', data });
+      // Casing underneath gives the line contrast over both light streets and
+      // dark satellite-ish tiles.
+      map.addLayer({
+        id: CASING,
+        type: 'line',
+        source: SRC,
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': '#ffffff', 'line-width': 8, 'line-opacity': 0.9 },
+      });
+      map.addLayer({
+        id: LINE,
+        type: 'line',
+        source: SRC,
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': '#e4572e', 'line-width': 4 },
+      });
+    }
+
+    // Frame the route so the whole thing is visible.
+    if (routeGeometry && routeGeometry.length > 1) {
+      let minLon = Infinity;
+      let minLat = Infinity;
+      let maxLon = -Infinity;
+      let maxLat = -Infinity;
+      for (const [lon, lat] of routeGeometry) {
+        if (lon < minLon) minLon = lon;
+        if (lat < minLat) minLat = lat;
+        if (lon > maxLon) maxLon = lon;
+        if (lat > maxLat) maxLat = lat;
+      }
+      suppressUntilRef.current = Date.now() + 2000;
+      map.fitBounds(
+        [
+          [minLon, minLat],
+          [maxLon, maxLat],
+        ],
+        { padding: 60, duration: 700, maxZoom: 16 },
+      );
+    }
+  }, [routeGeometry]);
 
   return <div ref={containerRef} className="map-container" />;
 }

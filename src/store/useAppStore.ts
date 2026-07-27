@@ -83,7 +83,7 @@ export function savedFromDestination(d: Destination, location: string): SavedPla
   };
 }
 
-export type PanelTab = 'explore' | 'advice' | 'learn' | 'itinerary';
+export type PanelTab = 'explore' | 'advice' | 'learn' | 'itinerary' | 'travel';
 
 interface AppState {
   /** The place currently being explored (submitted search). */
@@ -97,6 +97,8 @@ interface AppState {
   hoveredId: string | null;
   /** Which side panel tab is showing. */
   panelTab: PanelTab;
+  /** Route line drawn on the map, as [lon, lat] pairs. Null when no route. */
+  routeGeometry: Array<[number, number]> | null;
   panelOpen: boolean;
   /**
    * Whether the map should frame (recenter/zoom to) the next loaded guide.
@@ -125,6 +127,7 @@ interface AppState {
   select: (id: string | null) => void;
   setHovered: (id: string | null) => void;
   setPanelTab: (t: PanelTab) => void;
+  setRouteGeometry: (g: Array<[number, number]> | null) => void;
   setPanelOpen: (open: boolean) => void;
 
   // Pins
@@ -159,6 +162,7 @@ export const useAppStore = create<AppState>()(
       selectedId: null,
       hoveredId: null,
       panelTab: 'explore',
+      routeGeometry: null,
       panelOpen: true,
       frameOnLoad: true,
 
@@ -181,9 +185,14 @@ export const useAppStore = create<AppState>()(
           return { activeCategories: next };
         }),
       clearCategories: () => set({ activeCategories: new Set() }),
-      select: (id) => set({ selectedId: id, panelOpen: true }),
+      // Selecting a place always shows it. The detail view lives in the Explore
+      // tab, so jump there — otherwise clicking a map pin while reading Advice
+      // or Learn appeared to do nothing at all.
+      select: (id) =>
+        set(id ? { selectedId: id, panelOpen: true, panelTab: 'explore' } : { selectedId: id }),
       setHovered: (id) => set({ hoveredId: id }),
       setPanelTab: (t) => set({ panelTab: t }),
+      setRouteGeometry: (g) => set({ routeGeometry: g }),
       setPanelOpen: (open) => set({ panelOpen: open }),
 
       togglePin: (place) =>

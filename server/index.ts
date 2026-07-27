@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
+import compress from '@fastify/compress';
 import cron from 'node-cron';
 import { assembleGuide } from './assemble.ts';
 import { store } from './store.ts';
@@ -20,13 +21,31 @@ import { ingestUrl, ingestLocationAuto, ingestAllTracked } from './pipeline/inge
 import { runTuning } from './pipeline/tuning.ts';
 import { runTraining } from './pipeline/train.ts';
 import { answerTravelQuestion, type ChatRequest } from './pipeline/chat.ts';
+import { routeBetween, haversineKm } from './pipeline/routing.ts';
+import { getTravelOptions } from './pipeline/travel-links.ts';
+import { cachedGuide } from './pipeline/guide-cache.ts';
 import { getLLM } from './llm/adapter.ts';
 import { randomUUID } from 'node:crypto';
 import { hashPassword, verifyPassword, signToken, userIdFromAuthHeader } from './auth.ts';
 import type { User, UserData } from './store.ts';
 
+// Load local .env for development (Node built-in — no dependency). Runs before
+// any env is read (getLLM is lazy). Deployed environments inject real env vars,
+// so a missing file here is expected and harmless.
+try {
+  process.loadEnvFile();
+} catch {
+  /* no .env file present */
+}
+
 const app = Fastify({ logger: { level: 'warn' } });
 await app.register(cors, { origin: true });
+
+// Guide payloads are ~330KB of JSON and were being sent uncompressed, which is
+// most of the wait on a slow or distant connection. gzip/brotli takes that to
+// roughly a tenth. Threshold skips tiny responses where framing costs more than
+// it saves.
+await app.register(compress, { global: true, threshold: 1024 });
 
 app.get('/api/health', async () => ({
   ok: true,
@@ -40,7 +59,15 @@ app.get<{ Querystring: { q?: string; lang?: string } }>('/api/guide', async (req
   // Accept only a simple language code (e.g. "en", "ja", "pt").
   const lang = /^[a-z]{2,3}$/.test(req.query.lang ?? '') ? req.query.lang! : 'en';
   try {
-    return await assembleGuide(q, lang);
+    const { value, status, ageMs } = await cachedGuide(
+      `${q.toLowerCase()}::${lang}`,
+      () => assembleGuide(q, lang),
+    );
+    // Let the browser reuse it too, and allow serving stale while revalidating.
+    reply.header('Cache-Control', 'public, max-age=300, stale-while-revalidate=86400');
+    reply.header('X-Guide-Cache', status);
+    reply.header('Age', Math.round(ageMs / 1000).toString());
+    return value;
   } catch (err) {
     req.log.error(err);
     return reply.code(502).send({ error: (err as Error).message });
@@ -116,6 +143,50 @@ app.post<{ Body: ChatRequest }>('/api/chat', async (req, reply) => {
     req.log.error(err);
     return reply.code(502).send({ error: (err as Error).message });
   }
+});
+
+// --- Getting around & getting there ----------------------------------------
+
+// Point-to-point directions between two places in a guide.
+app.get<{
+  Querystring: { from?: string; to?: string; mode?: string };
+}>('/api/route', async (req, reply) => {
+  const parse = (s?: string): { lat: number; lon: number } | null => {
+    const [lat, lon] = (s ?? '').split(',').map(Number);
+    return Number.isFinite(lat) && Number.isFinite(lon) ? { lat, lon } : null;
+  };
+  const from = parse(req.query.from);
+  const to = parse(req.query.to);
+  if (!from || !to) {
+    return reply.code(400).send({ error: 'from and to are required as "lat,lon"' });
+  }
+  const mode = (['walking', 'cycling', 'driving'] as const).find((m) => m === req.query.mode)
+    ?? 'walking';
+
+  const route = await routeBetween(from, to, mode);
+  if (route) return route;
+
+  // Router unavailable: return the straight-line distance so the UI can still
+  // say something useful instead of showing an error.
+  return reply.code(200).send({
+    mode,
+    distanceKm: haversineKm(from, to),
+    durationSec: 0,
+    geometry: [],
+    steps: [],
+    approximate: true,
+  });
+});
+
+// Real, bookable ways to reach the destination city (deep links to operators).
+app.get<{
+  Querystring: { from?: string; to?: string; date?: string };
+}>('/api/travel-options', async (req, reply) => {
+  const from = (req.query.from ?? '').trim();
+  const to = (req.query.to ?? '').trim();
+  if (!from || !to) return reply.code(400).send({ error: 'from and to are required' });
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date ?? '') ? req.query.date : undefined;
+  return getTravelOptions({ from, to, date });
 });
 
 app.post('/api/tune', async () => runTuning());

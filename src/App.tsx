@@ -8,6 +8,7 @@ import DestinationDetail from './components/DestinationDetail';
 import AdvicePanel from './components/AdvicePanel';
 import LearningPanel from './components/LearningPanel';
 import ItineraryPanel from './components/ItineraryPanel';
+import TravelPanel from './components/TravelPanel';
 import LanguageSelector from './components/LanguageSelector';
 import AuthWidget from './components/AuthWidget';
 import ChatWidget from './components/ChatWidget';
@@ -47,6 +48,7 @@ export default function App() {
   const hoveredId = useAppStore((s) => s.hoveredId);
   const select = useAppStore((s) => s.select);
   const panelTab = useAppStore((s) => s.panelTab);
+  const routeGeometry = useAppStore((s) => s.routeGeometry);
   const setPanelTab = useAppStore((s) => s.setPanelTab);
   const panelOpen = useAppStore((s) => s.panelOpen);
   const setPanelOpen = useAppStore((s) => s.setPanelOpen);
@@ -146,6 +148,7 @@ export default function App() {
         allCategories={active.size === 0}
         frameOnLoad={frameOnLoad}
         lang={lang}
+        routeGeometry={routeGeometry}
       />
 
       <div className="map-controls">
@@ -222,6 +225,12 @@ export default function App() {
               🧳 {t('tab_itinerary')}
             </button>
             <button
+              className={'tab' + (panelTab === 'travel' ? ' tab--on' : '')}
+              onClick={() => setPanelTab('travel')}
+            >
+              ✈️ {t('tab_travel')}
+            </button>
+            <button
               className={'tab' + (panelTab === 'learn' ? ' tab--on' : '')}
               onClick={() => setPanelTab('learn')}
             >
@@ -264,6 +273,7 @@ export default function App() {
                 ))}
               {panelTab === 'advice' && <AdvicePanel guide={guide} />}
               {panelTab === 'itinerary' && <ItineraryPanel guide={guide} />}
+              {panelTab === 'travel' && <TravelPanel guide={guide} />}
               {panelTab === 'learn' && <LearningPanel guide={guide} />}
             </>
           )}

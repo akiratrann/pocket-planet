@@ -70,6 +70,7 @@ const en: Dict = {
   chat_offline: 'Start the backend (npm run dev:all) to chat with the travel assistant.',
   chat_clear: 'Clear chat',
   tab_itinerary: 'Itinerary',
+  tab_travel: 'Travel',
   pin: 'Pin',
   pinned: 'Pinned',
   unpin: 'Unpin',

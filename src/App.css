@@ -1916,3 +1916,213 @@ a.opinions__src:hover {
 .auth-guest:hover {
   color: var(--ink);
 }
+
+/* --- Travel tab: getting there (bookings) + getting around (directions) --- */
+.travel {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding: 14px 16px 28px;
+}
+
+.travel__section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.travel__heading {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.travel__hint {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-soft);
+}
+
+.travel__row {
+  display: flex;
+  gap: 8px;
+}
+
+.travel__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 9px 11px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+
+.travel__input--date {
+  flex: 0 0 auto;
+  width: 9.5rem;
+}
+
+.travel__input:focus-visible,
+.travel__field select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.travel__field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.travel__field > span {
+  flex: 0 0 2.6rem;
+}
+
+.travel__field select {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+
+.travel__modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.travel__mode {
+  padding: 7px 11px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink-soft);
+  cursor: pointer;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+
+.travel__mode--on {
+  font-weight: 650;
+  color: #fff;
+  background: var(--ink);
+  border-color: var(--ink);
+}
+
+.travel__go {
+  align-self: flex-start;
+  padding: 9px 15px;
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 650;
+  color: #fff;
+  cursor: pointer;
+  background: var(--accent);
+  border: 0;
+  border-radius: 9px;
+}
+
+.travel__go:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.travel__options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.travel__option {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 10px;
+  padding: 11px 13px;
+  text-decoration: none;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+}
+
+.travel__option:hover {
+  border-color: var(--accent);
+}
+
+.travel__option-label {
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--ink);
+}
+
+.travel__option-provider {
+  font-size: 11.5px;
+  color: var(--ink-soft);
+  text-align: right;
+}
+
+.travel__option-desc {
+  grid-column: 1 / -1;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--ink-soft);
+}
+
+.travel__option-note {
+  grid-column: 1 / -1;
+  margin-top: 3px;
+  font-size: 11.5px;
+  font-style: italic;
+  color: var(--ink-soft);
+}
+
+.travel__result {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 13px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+}
+
+.travel__summary {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.travel__summary strong {
+  font-size: 20px;
+  color: var(--ink);
+}
+
+.travel__summary span {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.travel__steps {
+  max-height: 220px;
+  margin: 0;
+  padding-left: 20px;
+  overflow-y: auto;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ink-soft);
+}
