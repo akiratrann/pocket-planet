@@ -80,9 +80,13 @@ const CIVIC_NAME_PATTERNS = [
   'post office', 'city hall', 'town hall', 'village office', 'ward office',
   'municipal office', 'prefectural office', 'city office', 'police station',
   'police box', 'fire station', 'tax office', 'employment office',
-  // Health.
-  'hospital', 'clinic', 'health centre', 'health center', 'medical centre',
-  'medical center',
+  // Health. Deliberately NOT a bare "hospital": historic ones are among the
+  // great sights of Europe (Barcelona's Hospital de Sant Pau is a UNESCO site),
+  // and a working hospital that has a Wikipedia article is already caught
+  // upstream by its Wikidata class, which is the check that can tell them apart.
+  'general hospital', 'city hospital', 'central hospital', 'regional hospital',
+  'district hospital', 'university hospital', 'psychiatric hospital',
+  'clinic', 'health centre', 'health center', 'medical centre', 'medical center',
   // Money.
   'atm',
   // Utilities and generic infrastructure.
