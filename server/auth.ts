@@ -7,7 +7,7 @@
 
 import { randomBytes, scrypt, timingSafeEqual, createHmac } from 'node:crypto';
 import { promisify } from 'node:util';
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -31,7 +31,12 @@ const scryptAsync = promisify(scrypt) as (
 
 function loadSecret(): string {
   try {
-    if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
+    // 0700 on the directory: everything under it is account data (emails, saved
+    // trips, password hashes) plus this signing secret. The secret file is
+    // already 0600, but the sibling users.json is written 0644 by store.ts, so
+    // locking the directory is what actually keeps other local accounts out.
+    if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
+    else chmodSync(DATA_DIR, 0o700);
     if (existsSync(SECRET_FILE)) return readFileSync(SECRET_FILE, 'utf8').trim();
     const secret = randomBytes(48).toString('hex');
     writeFileSync(SECRET_FILE, secret, { mode: 0o600 });
