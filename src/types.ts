@@ -56,6 +56,13 @@ export interface Destination {
    */
   mentions?: Record<string, number>;
   /**
+   * This place's name and/or description were machine-translated, because no
+   * Wikipedia edition or Wikidata label covered it in the reader's language.
+   * Surfaced to the reader: a translation is not an editor's own sentence, and
+   * they should know which text to double-check.
+   */
+  translated?: boolean;
+  /**
    * The boost those mentions actually contributed to `score`. Kept separate from
    * `mentions` because providers are weighted differently (a Lonely Planet
    * mention counts for four Stack Exchange ones), so folding the weighting into

@@ -39,7 +39,7 @@ const COMMONS_CAP = 80;
  * them — a photo cached when a bare surname was enough to match must not
  * outlive the rule that let it in. Entries from older generations are pruned.
  */
-const RULES = 'v3';
+const RULES = 'v4';
 /** Parallelism for the per-category Commons calls (kept low to avoid throttling). */
 const CONCURRENCY = 4;
 
@@ -85,14 +85,31 @@ const GENERIC_WORDS = new Set([
   'garden', 'gardens', 'hall', 'castle', 'onsen', 'hot', 'spring', 'springs',
   'city', 'town', 'village', 'prefecture', 'former', 'old', 'great', 'grand',
   'national', 'historic', 'historical', 'site', 'ruins', 'station', 'river',
-  'mountain', 'mount', 'lake', 'falls', 'waterfall', 'house', 'center',
+  'mountain', 'mount', 'lake', 'falls', 'waterfall', 'beach', 'house', 'center',
   'centre', 'memorial', 'art', 'history', 'the', 'of', 'and',
 ]);
 
-/** Lowercase, strip diacritics, keep alnum tokens. Parentheticals are dropped
- *  unless `keepParenthetical` — see fileMatchesName for why that matters. */
+/**
+ * Scripts that don't separate words with spaces, so a "word" has to be taken as
+ * the whole run of characters rather than something split out of it.
+ */
+const UNSPACED_SCRIPT = /[㐀-䶿一-鿿぀-ゟ゠-ヿ가-힯]+/g;
+
+/**
+ * Lowercase, strip diacritics, keep alnum tokens. Parentheticals are dropped
+ * unless `keepParenthetical` — see fileMatchesName for why that matters.
+ *
+ * Folding to Latin alone silently erases any name not written in Latin script:
+ * the `[^a-z0-9]` pass deletes every character of 回顧の滝, leaving no tokens at
+ * all — and a name with no tokens can never be verified against anything, so
+ * every name-checked source was permanently unreachable for Japanese-, Chinese-
+ * and Korean-named listings, even where Commons holds a file named for them
+ * character-for-character. Runs of those scripts are kept as tokens of their own.
+ */
 function foldTokens(s: string, keepParenthetical = false): string[] {
-  return (keepParenthetical ? s : s.replace(/\([^)]*\)/g, ' '))
+  const src = keepParenthetical ? s : s.replace(/\([^)]*\)/g, ' ');
+  const unspaced = (src.match(UNSPACED_SCRIPT) ?? []).filter((t) => t.length >= 2);
+  const latin = src
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
@@ -100,6 +117,26 @@ function foldTokens(s: string, keepParenthetical = false): string[] {
     .trim()
     .split(' ')
     .filter((t) => t.length >= 3);
+  return [...unspaced, ...latin];
+}
+
+/** True when a token is a run of unspaced script rather than a Latin word. */
+function isUnspaced(token: string): boolean {
+  UNSPACED_SCRIPT.lastIndex = 0; // the regex is /g — reset before a .test()
+  return UNSPACED_SCRIPT.test(token);
+}
+
+/**
+ * Is `token` present among a file's tokens? A Latin token has to match a whole
+ * word. An unspaced-script token has no word boundaries to anchor on — Commons
+ * files 回顧の滝 both on its own and run together with its neighbours — so for
+ * those, occurring inside a token counts as present.
+ */
+function hasToken(fileTokens: Set<string>, token: string): boolean {
+  if (fileTokens.has(token)) return true;
+  if (!isUnspaced(token)) return false;
+  for (const f of fileTokens) if (f.includes(token)) return true;
+  return false;
 }
 
 /** The tokens of `name` that actually pin down which place it is. */
@@ -116,7 +153,7 @@ function titleMatchesName(name: string, title: string): boolean {
   const distinctive = distinctiveTokens(name);
   if (!distinctive.length) return false; // nothing specific to verify against
   const titleSet = new Set(foldTokens(title));
-  return distinctive.every((t) => titleSet.has(t));
+  return distinctive.every((t) => hasToken(titleSet, t));
 }
 
 /**
@@ -129,9 +166,13 @@ function titleMatchesName(name: string, title: string): boolean {
 function fileMatchesName(name: string, fileTitle: string): boolean {
   const distinctive = distinctiveTokens(name);
   if (!distinctive.length) return false;
-  const stem = fileTitle.replace(/^File:/i, '').replace(/\.[a-z0-9]+$/i, '');
-  const fileSet = new Set(foldTokens(stem, true));
-  return distinctive.every((t) => fileSet.has(t));
+  const fileSet = new Set(foldTokens(fileStem(fileTitle), true));
+  return distinctive.every((t) => hasToken(fileSet, t));
+}
+
+/** A Commons file title with the namespace and extension stripped. */
+function fileStem(fileTitle: string): string {
+  return fileTitle.replace(/^File:/i, '').replace(/\.[a-z0-9]+$/i, '');
 }
 
 /**
@@ -355,6 +396,15 @@ const MATCH_MAX_KM = 25;
  * alone, and the nearest article to a Hoi An restaurant is a museum down the
  * street. Both fuzzy lookups are therefore restricted to these categories: no
  * upside outside them, and a wrong photo is worse than none.
+ *
+ * Opening this up to `sleep` and `activities` was tried and measured, and it is
+ * not safe. It does find real photos — of 21 listings it reached, 13 were right
+ * ("Capella Hanoi", "Melia Hanoi Hotel", "Riad Papillon"). But the other 8 were
+ * badly wrong: Marrakesh's "Hotel Atlas" got a hotel in *Berlin*, its "Hotel
+ * Cecil" a London hotel demolished in 1930, its "Moroccan House Hotel" the
+ * Moroccan parliament, and Hanoi's "Lotte Hotel" the shops in the mall below it.
+ * A business is named for a brand or a common noun rather than for a building,
+ * and no filename test separated the 13 from the 8. So the door stays shut.
  */
 const PHOTOGRAPHED_CATEGORIES = new Set<CategoryId>(['sights', 'culture', 'nature']);
 
@@ -367,13 +417,38 @@ function localTokens(name: string, place: string): string[] {
 /** How many of a place's own name tokens a nearby photo must carry to be trusted. */
 const GEO_NAME_TOKENS = 2;
 const COMMONS_GEO_RADIUS_M = 250;
+/**
+ * A one-token name has to prove itself with that single token, so the token
+ * itself must be substantial. "Himekannon" identifies a place; "Tan" (from "Old
+ * House of Tan Ky", whose second word is too short to survive folding) would
+ * match half the files in the block.
+ */
+const LONE_TOKEN_MIN_LEN = 5;
+
+/**
+ * How many of the name's tokens a nearby file has to carry: all of them for a
+ * short name, GEO_NAME_TOKENS for a longer one.
+ *
+ * Demanding two tokens outright meant a place whose name reduces to ONE token
+ * was skipped entirely — no evidence could ever satisfy the rule, so Kakunodate's
+ * "Himekannon" went without a photo while a file named for it sat 25 m away.
+ * Requiring *every* token of such a name is the same standard, not a weaker one.
+ * It stays a high bar for longer names, which is what stops a photo of "Trần Nhân
+ * Tông Street" attaching itself to "Hanoi Train Street" on the word "street"
+ * alone, and "Lake Tazawako" to the "Tazawako Floating Sign" on the lake's name.
+ */
+function geoTokensRequired(needed: string[]): number {
+  if (needed.length >= GEO_NAME_TOKENS) return GEO_NAME_TOKENS;
+  return needed.length;
+}
 
 /**
  * Photos taken AT a place: found on Commons by coordinate, confirmed by name.
  *
  * Position on its own is worthless — the files nearest Hoi An's "Old house of
  * Phung Hung" are all of the Japanese Covered Bridge twelve metres away — so a
- * candidate has to carry two of the place's own name tokens as well. Tokens that
+ * candidate has to carry the place's own name as well (see geoTokensRequired for
+ * how much of it, which depends on how much name there is). Tokens that
  * merely name the city don't count towards that, or "Hanoi Train Street" happily
  * accepts a photo of a different street in Hanoi. Together the two signals are
  * strong: "Hội An, Trieu Chau Assembly Hall" 19 m from the "Trieu Chau Meeting
@@ -387,7 +462,10 @@ async function geosearchCommonsPhotos(
   lon: number,
 ): Promise<string[]> {
   const needed = localTokens(name, place);
-  if (needed.length < GEO_NAME_TOKENS) return []; // nothing specific enough to confirm with
+  const required = geoTokensRequired(needed);
+  if (!required) return []; // nothing specific enough to confirm with
+  // A name that rests on one token needs that token to be a real word.
+  if (required === 1 && !isUnspaced(needed[0]) && needed[0].length < LONE_TOKEN_MIN_LEN) return [];
   const url =
     'https://commons.wikimedia.org/w/api.php?action=query&format=json&formatversion=2&origin=*' +
     `&generator=geosearch&ggsnamespace=6&ggslimit=30&ggsradius=${COMMONS_GEO_RADIUS_M}` +
@@ -406,9 +484,8 @@ async function geosearchCommonsPhotos(
 
   const out: string[] = [];
   for (const p of pages) {
-    const stem = String(p.title ?? '').replace(/^File:/i, '').replace(/\.[a-z0-9]+$/i, '');
-    const fileTokens = new Set(foldTokens(stem, true));
-    if (needed.filter((t) => fileTokens.has(t)).length < GEO_NAME_TOKENS) continue;
+    const fileTokens = new Set(foldTokens(fileStem(String(p.title ?? '')), true));
+    if (needed.filter((t) => hasToken(fileTokens, t)).length < required) continue;
     const photo = usablePhoto(p);
     if (photo) out.push(photo.url);
     if (out.length >= MAX_PER_PLACE) break;
@@ -417,54 +494,122 @@ async function geosearchCommonsPhotos(
 }
 
 /**
- * Search Commons directly for photos of a place, by name + the location it sits
- * in. This is the only source that reaches places with no encyclopedia article
- * and no Wikidata item at all — Hoi An's assembly halls and merchant houses are
- * thoroughly photographed on Commons but appear in no Wikipedia we scrape.
+ * Terms a Commons full-text search chokes on. Its search is conjunctive, so a
+ * stray "&" or a "(South)" is one more term every file must satisfy — and the
+ * usual result is zero hits: "Lý Thái Tổ Statue & Park Hanoi" matched nothing at
+ * all while the statue's photos sat on Commons under obvious names.
+ */
+function searchTerms(s: string): string {
+  return s.replace(/\([^)]*\)/g, ' ').replace(/[&/|+_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * The part of a guide's title that names the place. Wikivoyage titles a city
+ * article by its path ("Semboku/Kakunodate"), and pushing the whole path into a
+ * search demands the files mention the parent region too — "Odano House
+ * Semboku/Kakunodate" found nothing, "Odano House Kakunodate" found the house.
+ */
+function placeTerm(place: string): string {
+  return searchTerms(place.split('/').pop() ?? place);
+}
+
+/**
+ * Search Commons directly for photos of a place. This is the only source that
+ * reaches places with no encyclopedia article and no Wikidata item at all — Hoi
+ * An's assembly halls and merchant houses are thoroughly photographed on Commons
+ * but appear in no Wikipedia we scrape.
  *
- * Search relevance alone would attach lookalikes (a Thai "Bang Hoi Beach" for
- * Hoi An's "An Bang Beach"), so every hit must clear two checks: its filename
- * carries all the distinctive tokens of the name, and — when the file is
- * geotagged — the camera was near the place. An untagged file is accepted on the
- * name alone; a tagged one that disagrees with the coordinates is always dropped.
+ * Two queries, because they fail in opposite directions. Adding the location
+ * pins the search down but throws away most real matches (Commons wants every
+ * term to hit, and a photographer who wrote "Kakunodate" did not also write
+ * "Semboku"); the name on its own finds them but will just as happily return the
+ * same name somewhere else on earth. So they are trusted differently:
+ *
+ *  - Located query: the search engine has already matched the location against
+ *    the file's text, so a filename carrying the name's distinctive tokens is
+ *    enough — this is the long-standing rule, and it is what most current photos
+ *    came in on ("Old House of Tan Ky", "Teradaya", "Togetsukyō Bridge", whose
+ *    filenames never mention the city).
+ *  - Name-only query: nothing has vouched for the location, so the file must do
+ *    it itself — either geotagged at the place, or naming the place in the
+ *    filename. Without that, this query is exactly the hole the old code fell
+ *    through: "Central Market" matching *Central Market north Austin*, "Night
+ *    Market" matching *Shilin Night Market*. Both are name matches; neither is
+ *    within a continent of the guide, and neither says "Hoi An" anywhere.
+ *
+ * A geotagged file that disagrees with the coordinates is always dropped.
  */
 async function searchCommonsPhotos(
   name: string,
   place: string,
+  scope: PlaceScope,
   lat?: number,
   lon?: number,
 ): Promise<string[]> {
-  const url =
-    'https://commons.wikimedia.org/w/api.php?action=query&format=json&formatversion=2&origin=*' +
-    '&generator=search&gsrnamespace=6&gsrlimit=12' +
-    `&gsrsearch=${encodeURIComponent(`${name} ${place}`)}` +
-    `&prop=imageinfo|coordinates&iiprop=url|mime|size&iiurlwidth=${IMG_WIDTH}`;
-  let data: any;
-  try {
-    data = await getJson(url);
-  } catch {
-    return [];
-  }
-  // Keep the search engine's relevance order; `pages` comes back unordered.
-  const pages: any[] = (data?.query?.pages ?? [])
-    .slice()
-    .sort((a: any, b: any) => (a.index ?? 0) - (b.index ?? 0));
+  const runQuery = async (query: string): Promise<any[]> => {
+    const url =
+      'https://commons.wikimedia.org/w/api.php?action=query&format=json&formatversion=2&origin=*' +
+      '&generator=search&gsrnamespace=6&gsrlimit=12' +
+      `&gsrsearch=${encodeURIComponent(query)}` +
+      `&prop=imageinfo|coordinates&iiprop=url|mime|size&iiurlwidth=${IMG_WIDTH}`;
+    try {
+      const data = await getJson(url);
+      // Keep the search engine's relevance order; `pages` comes back unordered.
+      return (data?.query?.pages ?? [])
+        .slice()
+        .sort((a: any, b: any) => (a.index ?? 0) - (b.index ?? 0));
+    } catch {
+      return [];
+    }
+  };
+
+  const terms = searchTerms(name);
+  if (!terms) return [];
+
+  // Does the filename itself say which town this is?
+  const placeTokens = distinctiveTokens(placeTerm(place));
+  const namesThePlace = (title: string): boolean => {
+    if (!placeTokens.length) return false;
+    const fileTokens = new Set(foldTokens(fileStem(title), true));
+    return placeTokens.some((t) => hasToken(fileTokens, t));
+  };
 
   const out: string[] = [];
-  for (const p of pages) {
-    if (!fileMatchesName(name, p.title ?? '')) continue;
-    const co = p.coordinates?.[0];
-    if (
-      co?.lat != null &&
-      lat != null &&
-      lon != null &&
-      haversineKm(lat, lon, co.lat, co.lon) > MATCH_MAX_KM
-    ) {
-      continue; // same name, photographed somewhere else entirely
-    }
-    const photo = usablePhoto(p);
-    if (photo) out.push(photo.url);
+  const seen = new Set<string>();
+  // The located query runs first and the name-only one only if it left us short,
+  // so the common case costs the same one request it always did.
+  for (const [query, vouched] of [
+    [`${terms} ${placeTerm(place)}`, true],
+    [terms, false],
+  ] as Array<[string, boolean]>) {
     if (out.length >= MAX_PER_PLACE) break;
+    const pages = await runQuery(query);
+    for (const p of pages) {
+      const title = String(p.title ?? '');
+      if (seen.has(title)) continue;
+      if (!fileMatchesName(name, title)) continue;
+
+      const co = p.coordinates?.[0];
+      const geotagged = co?.lat != null && co?.lon != null;
+      // Where the file has to have been taken: at the listing when it has its
+      // own coordinates, otherwise anywhere within the guide's extent.
+      const fromLat = lat ?? scope.lat;
+      const fromLon = lon ?? scope.lon;
+      const maxKm = lat != null ? MATCH_MAX_KM : scope.radiusKm;
+      const near =
+        geotagged && fromLat != null && fromLon != null
+          ? haversineKm(fromLat, fromLon, co.lat, co.lon) <= maxKm
+          : null;
+      if (near === false) continue; // same name, photographed somewhere else entirely
+      if (!vouched && near !== true && !namesThePlace(title)) continue;
+
+      const photo = usablePhoto(p);
+      if (photo) {
+        seen.add(title);
+        out.push(photo.url);
+      }
+      if (out.length >= MAX_PER_PLACE) return out;
+    }
   }
   return out;
 }
@@ -613,7 +758,15 @@ const GEO_RADIUS_M = 300;
 // the same building, not the same block: at 170 m it was handing Hanoi's Lý Thái
 // Tổ statue the tower down the road and Kakunodate's Tatsuko statue a shrine on
 // the same lakeshore.
-const GEO_MAX_DIST_M = 70;
+//
+// 70 m was still the same block. Measured over every listing this phase resolved:
+// the right answers came in at 0, 1, 5, 6 and 17 m — a listing and its article
+// are describing one building, and both coordinates ultimately come from the same
+// survey — while the wrong ones sat at 37 m (Hoi An's "Chinese Assembly Hall",
+// given the Museum of Trade Ceramics down the street) and 61 m (the Tatsuko
+// statue, still getting 漢槎宮). There is clear air between the two groups, so the
+// cut goes in it.
+const GEO_MAX_DIST_M = 25;
 
 interface GeoHit {
   title: string;
@@ -896,7 +1049,7 @@ export async function resolveImages(
 
     if (commonsTargets.length) {
       await pool(commonsTargets, async (d) => {
-        const imgs = await searchCommonsPhotos(d.name, place, d.lat, d.lon);
+        const imgs = await searchCommonsPhotos(d.name, place, scope, d.lat, d.lon);
         cache[commonsKey(d)] = imgs.length ? imgs : null;
         cacheDirty = true;
       });

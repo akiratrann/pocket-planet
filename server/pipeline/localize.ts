@@ -17,10 +17,21 @@
 // runs on every cold guide build, and must work with no API key at all) and
 // keeps every sentence attributable to a real article.
 //
-// Nothing here is machine-translated or invented.
+// Re-sourcing is always tried first and covers most places. What it cannot cover
+// is a place no edition in the reader's language has ever written about — a
+// rural Japanese temple with a Wikidata item but no English label, no English
+// article and no English one-line description. There is nothing to re-source
+// there, and the reader gets a card in a script they cannot read, so a last-
+// resort machine translation runs over exactly that residue. It is batched once
+// per guide, flagged `translated` on every place it touches so the reader knows
+// which text is not an editor's own, and skipped entirely when no API key is
+// configured.
+//
+// Nothing here is invented: translation only ever restates sourced text.
 
 import type { Destination } from '../../src/types.ts';
 import { sourceLangOf } from './discover.ts';
+import { getLLM } from '../llm/adapter.ts';
 
 const WIKIDATA = 'https://www.wikidata.org/w/api.php';
 const UA = 'PocketPlanet/1.0 (https://github.com/akiratrann/pocket-planet)';
@@ -119,6 +130,24 @@ function inScript(text: string, script: RegExp): boolean {
 /** Could this text be in `lang`? Negative signal only — see the note above. */
 function looksForeign(text: string, lang: string): boolean {
   return !inScript(text, LANG_SCRIPT[lang] ?? LATIN);
+}
+
+/**
+ * Does this NAME contain script the reader cannot read?
+ *
+ * Deliberately not `looksForeign`, which asks whether MOST of a text is in the
+ * wrong script and declines to judge anything under 8 letters. Both rules are
+ * right for a paragraph and wrong for a name: "下野の女夫マツ" is 7 letters, so it
+ * was never even considered, and "パノラマ展望台 (Panorama observatory)" is majority
+ * Latin, so it counted as English while still showing kana. Names are short and
+ * a single unreadable character is the whole problem, so any letter outside the
+ * reader's script counts.
+ */
+function needsScriptWork(name: string, lang: string): boolean {
+  const want = LANG_SCRIPT[lang] ?? LATIN;
+  const letters = name.match(/\p{L}/gu);
+  if (!letters) return false;
+  return letters.some((ch) => !want.test(ch));
 }
 
 function isForeignText(d: Destination, lang: string): boolean {
@@ -243,6 +272,12 @@ export async function localizeNames(destinations: Destination[], lang: string): 
   const lead = articles.size && wiki ? await extracts(lang, [...articles]) : new Map<string, string>();
 
   for (const d of destinations) {
+    // Free and key-less, so it runs for every place, Wikidata item or not:
+    // a name that already carries its own translation just needs splitting.
+    if (needsScriptWork(d.name, lang)) {
+      const split = scriptSplitName(d.name, lang);
+      if (split) d.name = split;
+    }
     if (!d.wikidata) continue;
     const local = info.get(d.wikidata);
     if (!local) continue;
@@ -270,6 +305,126 @@ export async function localizeNames(destinations: Destination[], lang: string): 
     // us the one thing the original had going for it — being the article the
     // rest of this place's data (name, image, coordinates) came from.
     if (text && !looksForeign(text, lang)) d.description = text;
+  }
+
+  // 4. Whatever is STILL unreadable had no counterpart to re-source anywhere in
+  //    Wikidata or Wikipedia. Translate it rather than hand the reader a card in
+  //    a script they did not ask for.
+  const jobs: TranslationJob[] = [];
+  for (const d of destinations) {
+    const job: TranslationJob = { d };
+    if (needsScriptWork(d.name, lang)) job.name = d.name;
+    if (d.description && looksForeign(d.description, lang)) job.description = d.description;
+    if (job.name || job.description) jobs.push(job);
+  }
+  if (jobs.length) await translateRemaining(jobs, lang);
+}
+
+// ---------------------------------------------------------------------------
+// Last resorts, for places the multilingual index simply does not cover.
+//
+// Re-sourcing is always preferred and is tried first: it yields real prose by
+// real editors, and it needs no API key. But a rural Japanese temple with a
+// Wikidata item, no English label, no English article and no English one-line
+// description leaves nothing to re-source, and the reader gets a card they
+// cannot read. Two fallbacks, cheapest first.
+// ---------------------------------------------------------------------------
+
+/**
+ * Some names already carry their own translation — OSM contributors write
+ * "パノラマ展望台 (Panorama observatory)" or "Tsumago Castle (妻籠城跡)". When a
+ * name mixes the reader's script with a foreign one, the part already in their
+ * script IS the translation, and it costs nothing to prefer it.
+ */
+function scriptSplitName(name: string, lang: string): string | null {
+  const want = LANG_SCRIPT[lang] ?? LATIN;
+  // Split on bracketed groups, keeping the pieces.
+  const parts = name.split(/[（(]([^）)]*)[）)]/).map((p) => p.trim()).filter(Boolean);
+  if (parts.length < 2) return null;
+  const good = parts.filter((p) => (p.match(/\p{L}/gu)?.length ?? 0) >= 2 && inScript(p, want));
+  if (good.length !== 1) return null;
+  const picked = good[0];
+  return picked !== name.trim() ? picked : null;
+}
+
+interface TranslationJob {
+  d: Destination;
+  name?: string;
+  description?: string;
+}
+
+/**
+ * Translate what could not be re-sourced, in ONE batched call per guide.
+ *
+ * This is the only machine translation in the pipeline and it is deliberately
+ * last: it runs solely on text that has no counterpart in the reader's language
+ * anywhere in Wikidata or Wikipedia. Translating a sourced sentence is not the
+ * same as inventing one, but it is not an editor's sentence either, so anything
+ * that comes back is flagged `translated` and the UI says so.
+ *
+ * Degrades silently: with no API key, or on any error or malformed reply, the
+ * original text is kept exactly as before.
+ */
+const translationCache = new Map<string, string>();
+
+async function translateRemaining(jobs: TranslationJob[], lang: string): Promise<void> {
+  const llm = getLLM();
+  if (!llm.generative || !llm.chat) return;
+
+  // Serve what we can from previous guide builds before paying for a call.
+  const pending: Array<{ job: TranslationJob; field: 'name' | 'description'; text: string }> = [];
+  for (const job of jobs) {
+    for (const field of ['name', 'description'] as const) {
+      const text = job[field];
+      if (!text) continue;
+      const hit = translationCache.get(`${lang} ${text}`);
+      if (hit) {
+        job.d[field] = hit;
+        job.d.translated = true;
+      } else {
+        pending.push({ job, field, text });
+      }
+    }
+  }
+  if (!pending.length) return;
+
+  const payload = pending.map((p, i) => ({ i, kind: p.field, text: p.text }));
+  const system =
+    'You translate place names and encyclopedia descriptions for a travel guide. ' +
+    'Translate faithfully and completely into the target language. Do not summarise, ' +
+    'embellish, or add facts that are not in the source. For place names, use the ' +
+    'established English form if one exists, otherwise a standard romanization; keep ' +
+    'any parenthetical disambiguation. Reply with JSON only: ' +
+    '{"out":[{"i":<number>,"text":"<translation>"}]} covering every input id.';
+  const user = `Target language code: ${lang}\n\n${JSON.stringify(payload)}`;
+
+  let reply: string;
+  try {
+    reply = await llm.chat(system, user);
+  } catch {
+    return; // keep the originals
+  }
+  const match = reply.match(/\{[\s\S]*\}/);
+  if (!match) return;
+  let parsed: { out?: Array<{ i?: number; text?: string }> };
+  try {
+    parsed = JSON.parse(match[0]) as typeof parsed;
+  } catch {
+    return;
+  }
+
+  for (const item of parsed.out ?? []) {
+    if (typeof item?.i !== 'number' || typeof item.text !== 'string') continue;
+    const slot = pending[item.i];
+    const text = item.text.trim();
+    // A "translation" still in the source script is the model echoing its input;
+    // keeping the original is no worse and avoids mislabelling it as translated.
+    const stillUnreadable =
+      slot?.field === 'name' ? needsScriptWork(text, lang) : looksForeign(text, lang);
+    if (!slot || !text || stillUnreadable) continue;
+    translationCache.set(`${lang} ${slot.text}`, text);
+    slot.job.d[slot.field] = text;
+    slot.job.d.translated = true;
   }
 }
 
