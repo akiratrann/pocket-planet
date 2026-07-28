@@ -160,7 +160,54 @@ const GENERIC_TOKENS = new Set([
   'hall', 'tower', 'centre', 'center', 'station', 'school', 'bank', 'office',
   'street', 'road', 'city', 'town', 'beach', 'island', 'ruins', 'palace', 'shop',
   'store', 'restaurant', 'cafe', 'festival', 'dance', 'monument', 'memorial',
+  'guesthouse', 'ryokan', 'villa', 'gallery', 'statue', 'pagoda', 'onsen', 'stadium',
 ]);
+
+/**
+ * The kind of thing each generic noun names. Sharing a distinctive token is not
+ * enough on its own when the two listings are plainly different kinds of thing:
+ * "Dakigaeri Valley" and "Dakigaeri Shrine" sit 150 m apart and share
+ * "dakigaeri", but one is a gorge and the other is the shrine at its mouth.
+ * "Ishiguro House" and "Ishiguro Samurai Residence" are 4 m apart and share
+ * "ishiguro", and a house IS a residence — so that pair is one place listed
+ * twice. Distance and tokens cannot tell those two situations apart; the kind
+ * noun can.
+ */
+const KIND_OF_TOKEN: Record<string, string> = {
+  waterfall: 'water', falls: 'water', thac: 'water', river: 'water', song: 'water', lake: 'water',
+  mountain: 'terrain', peak: 'terrain', nui: 'terrain', valley: 'terrain', cave: 'terrain',
+  hang: 'terrain', island: 'terrain', beach: 'terrain',
+  temple: 'worship', shrine: 'worship', chua: 'worship', den: 'worship', pagoda: 'worship',
+  house: 'dwelling', residence: 'dwelling', palace: 'dwelling', villa: 'dwelling',
+  hotel: 'lodging', hostel: 'lodging', guesthouse: 'lodging', ryokan: 'lodging', onsen: 'lodging',
+  museum: 'exhibit', gallery: 'exhibit',
+  school: 'civic', bank: 'civic', office: 'civic', station: 'civic', hall: 'civic',
+  market: 'commerce', shop: 'commerce', store: 'commerce', restaurant: 'commerce', cafe: 'commerce',
+  park: 'greenspace', garden: 'greenspace', reserve: 'greenspace',
+  castle: 'fort', ruins: 'fort',
+  festival: 'event', dance: 'event',
+  monument: 'landmark', memorial: 'landmark', statue: 'landmark', tower: 'landmark',
+  bridge: 'structure', stadium: 'structure',
+};
+
+/** Which kinds of thing a name claims to be. Empty when it says nothing. */
+function kindsOf(name: string): Set<string> {
+  const out = new Set<string>();
+  for (const w of name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').split(/[^a-z0-9]+/)) {
+    const kind = KIND_OF_TOKEN[w];
+    if (kind) out.add(kind);
+  }
+  return out;
+}
+
+/** A valley is not a shrine. Silence on either side is not a disagreement. */
+function kindsConflict(a: string, b: string): boolean {
+  const ka = kindsOf(a);
+  const kb = kindsOf(b);
+  if (!ka.size || !kb.size) return false;
+  for (const k of ka) if (kb.has(k)) return false;
+  return true;
+}
 
 function tokens(name: string): string[] {
   return name
@@ -199,29 +246,47 @@ const CONTAINMENT_MIN = 8;
  * high school and a post office where the guesthouse and the lion dance should
  * have been.
  *
- * Names are the only positive evidence, and one shared token is weak enough that
- * it is accepted only for the case this merge exists to serve: enriching a
- * coordinate-less Wikivoyage stub. Two POIs that both already know where they
- * are have to agree on their actual name.
+ * Names are the only positive evidence. A shared distinctive token is the
+ * weakest form of it, so it additionally requires that the two names do not
+ * claim to be different KINDS of thing — that is the one signal separating
+ * "Ishiguro House"/"Ishiguro Samurai Residence" (4 m apart, one place listed
+ * twice) from "Dakigaeri Valley"/"Dakigaeri Shrine" (150 m apart, a gorge and
+ * the shrine at its mouth). Distance cannot separate them and neither can the
+ * shared token; only "a house is a residence, a valley is not a shrine" can.
+ *
+ * Returns a strength score rather than a boolean so the caller can pick a stub's
+ * BEST candidate instead of whichever one happened to be discovered first.
+ * 0 means "not the same place".
  */
-function samePlace(a: Destination, b: Destination, stop: Set<string>): boolean {
-  if (a.wikidata && b.wikidata) return a.wikidata === b.wikidata;
+function matchStrength(a: Destination, b: Destination, stop: Set<string>): number {
+  if (a.wikidata && b.wikidata) return a.wikidata === b.wikidata ? 100 : 0;
 
   const bothGeo = a.lat != null && a.lon != null && b.lat != null && b.lon != null;
-  if (bothGeo && distKm([a.lat!, a.lon!], [b.lat!, b.lon!]) > SAME_PLACE_KM) return false;
+  if (bothGeo && distKm([a.lat!, a.lon!], [b.lat!, b.lon!]) > SAME_PLACE_KM) return 0;
 
   const fa = foldName(a.name);
   const fb = foldName(b.name);
-  if (!fa || !fb) return false;
-  if (fa === fb) return true;
+  if (!fa || !fb) return 0;
+  if (fa === fb) return 90;
   // "Hieu Waterfall" vs "Hieu Waterfall (Thac Hieu)" — one place, spelled longer.
+  // Not, however, when the shorter name is just the town's: "Kakunodate" sits
+  // inside "Festival of Kakunodate" without being it.
   const [shorter, longer] = fa.length <= fb.length ? [fa, fb] : [fb, fa];
-  if (shorter.length >= CONTAINMENT_MIN && longer.includes(shorter)) return true;
+  if (shorter.length >= CONTAINMENT_MIN && longer.includes(shorter) && !stop.has(shorter)) {
+    return 70;
+  }
 
-  if (bothGeo) return false;
+  // A house is not a shrine, however close together and whatever they share.
+  if (kindsConflict(a.name, b.name)) return 0;
+
   const ta = tokens(a.name).filter((t) => !stop.has(t));
   const tb = new Set(tokens(b.name).filter((t) => !stop.has(t)));
-  return ta.some((t) => tb.has(t)); // shares a distinctive proper-noun token
+  const shared = ta.filter((t) => tb.has(t)).length;
+  if (!shared) return 0;
+  // Agreeing on a distinctive name AND on being feet apart is the strongest
+  // evidence short of an identical name; agreeing on the name alone is what
+  // rescues a coordinate-less stub.
+  return (bothGeo ? 50 : 30) + shared;
 }
 
 /**
@@ -229,6 +294,11 @@ function samePlace(a: Destination, b: Destination, stop: Set<string>): boolean {
  * existing (often thin, coordinate-less) Wikivoyage stub, we ENRICH the stub with
  * the discovered coordinates / Wikidata id / description (keeping its—usually
  * English—name) instead of adding a duplicate. Genuinely new places are appended.
+ *
+ * Each discovered POI takes its BEST match rather than the first one that
+ * qualifies. Taking the first made the result depend on the order the discovery
+ * pass happened to return things: a weakly-matching POI could claim a stub and
+ * leave the genuinely-matching one to be appended as a duplicate.
  */
 function mergeDiscovered(
   base: Destination[],
@@ -238,8 +308,15 @@ function mergeDiscovered(
   const merged = base.map((d) => ({ ...d }));
   const added: Destination[] = [];
   for (const c of discovered) {
-    const hit =
-      merged.find((b) => samePlace(b, c, stop)) ?? added.find((a) => samePlace(a, c, stop));
+    let hit: Destination | undefined;
+    let best = 0;
+    for (const cand of [...merged, ...added]) {
+      const score = matchStrength(cand, c, stop);
+      if (score > best) {
+        best = score;
+        hit = cand;
+      }
+    }
     if (hit) {
       hit.lat ??= c.lat;
       hit.lon ??= c.lon;
