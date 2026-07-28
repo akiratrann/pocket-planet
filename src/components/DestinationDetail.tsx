@@ -13,6 +13,78 @@ import './place-photo.css';
 const SOURCE_PREVIEW = 4;
 
 /**
+ * Attribution copy for the score / rank explanation.
+ *
+ * These are new user-facing strings, but i18n.ts is owned by another agent right
+ * now, so they live here as local constants and fall back to English.
+ * TODO: move to i18n
+ */
+export const ATTRIB = {
+  /** The headline correction: a bare "80" badge otherwise reads as a verdict
+   *  issued by whichever brand is named nearby. */
+  scoreIs:
+    'Pocket Planet’s own score, worked out by this app from the sources below — not a rating published by Lonely Planet, Reddit or any other source here.',
+  badgeTip: 'Pocket Planet’s own score, not a source’s rating',
+  externalLabel: 'What outside sources said',
+  /** Shown when the ranker flagged an outside mention. Says what we know AND
+   *  what we don't: the guide carries no per-source tally for a place. */
+  externalNoBreakdown:
+    'Recorded as a mention only. The guide doesn’t keep a per-source tally for a place, so we can’t say which of the sources below it was, or how many times.',
+  externalNone:
+    'Nothing recorded. This place wasn’t matched to any of the outside sources read for this guide, so its position comes from its listing alone.',
+  sourceMix: 'Read across the whole guide',
+  /** The chip counts are guide-wide. Without this line they would be read as
+   *  "4 Lonely Planet mentions of THIS place", which is not what they are. */
+  sourceMixNote: 'Articles and threads read for this guide — not mentions of this place.',
+} as const;
+
+/**
+ * A source's publisher, taken from its URL host.
+ *
+ * The host is a fact already in the payload, so grouping by it invents nothing.
+ * (`meta.sources` drops the server's own `provider` field, and carries no
+ * per-place breakdown at all — hence the caveats above.)
+ */
+const HOST_LABELS: ReadonlyArray<readonly [RegExp, string]> = [
+  [/(^|\.)lonelyplanet\.com$/i, 'Lonely Planet'],
+  [/(^|\.)reddit\.com$/i, 'Reddit'],
+  [/(^|\.)youtube\.com$/i, 'YouTube'],
+  [/(^|\.)travel\.stackexchange\.com$/i, 'Travel Stack Exchange'],
+  [/(^|\.)stackexchange\.com$/i, 'Stack Exchange'],
+  [/(^|\.)wikivoyage\.org$/i, 'Wikivoyage'],
+  [/(^|\.)wikipedia\.org$/i, 'Wikipedia'],
+];
+
+function providerOf(url: string): string {
+  let host: string;
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    return 'Other'; // an unparseable URL gets no brand name attached to it
+  }
+  for (const [re, label] of HOST_LABELS) if (re.test(host)) return label;
+  return host.replace(/^www\./, ''); // unknown publisher: show the bare host
+}
+
+/** Publisher → how many of the guide's sources came from it, most first. */
+function providerMix(sources: ReadonlyArray<{ url: string }>): Array<[string, number]> {
+  const by = new Map<string, number>();
+  for (const s of sources) {
+    const p = providerOf(s.url);
+    by.set(p, (by.get(p) ?? 0) + 1);
+  }
+  return [...by.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+}
+
+/**
+ * The one reason the ranker emits that is about an OUTSIDE source rather than
+ * about the listing itself (see `rawScore` in data/ranking.ts). Reasons are fixed
+ * English literals produced by the ranker — they never go through i18n — so
+ * matching on the wording is stable.
+ */
+const EXTERNAL_REASON_RE = /trusted travel sources/i;
+
+/**
  * One photo slot, shared by the card thumbnail and the detail hero.
  *
  * A category tile is ALWAYS rendered at the slot's full size and the photo is
@@ -121,6 +193,14 @@ export function RankProvenance({ d, location }: { d: Destination; location: stri
   const meta = guide?.meta;
   const sources = meta?.sources ?? [];
   const shownSources = allSources ? sources : sources.slice(0, SOURCE_PREVIEW);
+  const mix = providerMix(sources);
+
+  // Split the ranker's reasons by WHO they come from. Conflating "this listing
+  // has a photo" (something we measured) with "an outside source recommends it"
+  // (something someone else said) is exactly the confusion this panel exists to
+  // undo, so they never share a list.
+  const externalReasons = d.reasons.filter((r) => EXTERNAL_REASON_RE.test(r));
+  const listingReasons = d.reasons.filter((r) => !EXTERNAL_REASON_RE.test(r));
 
   return (
     <div className="prov">
@@ -131,15 +211,19 @@ export function RankProvenance({ d, location }: { d: Destination; location: stri
         </span>
         <span className="prov__score">{d.score}/100</span>
       </div>
+      {/* Attribution comes FIRST, before any source is named further down — by the
+          time a reader reaches "Lonely Planet" they must already know the number
+          isn't theirs. */}
+      <p className="prov__attrib">{ATTRIB.scoreIs}</p>
       <p className="prov__basis">
         {t('score_basis')} {t('rank_scope')}
       </p>
 
       <div className="prov__section">
         <div className="prov__label">{t('what_lifted_it')}</div>
-        {d.reasons.length > 0 ? (
+        {listingReasons.length > 0 ? (
           <ul className="prov__reasons">
-            {d.reasons.map((r) => (
+            {listingReasons.map((r) => (
               <li key={r}>
                 <span className="prov__check">✓</span>
                 <span>{r}</span>
@@ -148,6 +232,27 @@ export function RankProvenance({ d, location }: { d: Destination; location: stri
           </ul>
         ) : (
           <p className="prov__none">{t('no_signals')}</p>
+        )}
+      </div>
+
+      <div className="prov__section">
+        <div className="prov__label">{ATTRIB.externalLabel}</div>
+        {externalReasons.length > 0 ? (
+          <>
+            <ul className="prov__reasons">
+              {externalReasons.map((r) => (
+                <li key={r}>
+                  {/* A quote mark, not a checkmark: this is someone else's word,
+                      not a box we ticked. */}
+                  <span className="prov__quote">❝</span>
+                  <span>{r}</span>
+                </li>
+              ))}
+            </ul>
+            <p className="prov__note">{ATTRIB.externalNoBreakdown}</p>
+          </>
+        ) : (
+          <p className="prov__none">{ATTRIB.externalNone}</p>
         )}
       </div>
 
@@ -169,6 +274,22 @@ export function RankProvenance({ d, location }: { d: Destination; location: stri
 
       <div className="prov__section">
         <div className="prov__label">{t('sources_used')}</div>
+        {/* Which publishers were actually read, at a glance — this answers
+            "ranked by who?" without making anyone scan the full link list.
+            Guide-wide by nature, and labelled as such. */}
+        {mix.length > 0 && (
+          <>
+            <div className="prov__mix" aria-label={ATTRIB.sourceMix}>
+              {mix.map(([name, n]) => (
+                <span className="prov__chip" key={name}>
+                  {name}
+                  <span className="prov__chipn">{n}</span>
+                </span>
+              ))}
+            </div>
+            <p className="prov__note">{ATTRIB.sourceMixNote}</p>
+          </>
+        )}
         <ul className="prov__sources">
           {guide?.sourceUrl && (
             <li>
@@ -274,6 +395,9 @@ export default function DestinationDetail({ d, location }: { d: Destination; loc
           className="detail__rank detail__rank--btn"
           onClick={() => setShowProvenance((v) => !v)}
           aria-expanded={showProvenance}
+          // Most readers never open the panel, so the shortest possible version
+          // of the attribution has to survive on hover alone.
+          title={ATTRIB.badgeTip}
         >
           #{d.rank} {t('most_recommended')} · {d.score}/100
           <span className="scorebadge__cue" aria-hidden="true">

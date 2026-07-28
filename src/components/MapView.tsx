@@ -42,8 +42,14 @@ const MAP_STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty';
 // since we ship no RTL text plugin.
 const ENGLISH_LABEL = [
   'coalesce',
-  ['get', 'name:en'],
+  // OpenMapTiles names the English field `name_en` with an UNDERSCORE. An
+  // earlier version asked for `name:en` (colon), which simply does not exist in
+  // this schema — that branch always missed, so everything fell through to
+  // `name:latin`, and anything without a latin name still rendered Japanese.
+  // The style's own layers use `name_en`, which is how this was confirmed.
+  ['get', 'name_en'],
   ['get', 'name:latin'],
+  ['get', 'name_int'],
   ['get', 'name'],
 ] as unknown as ExpressionSpecification;
 

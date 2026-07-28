@@ -73,8 +73,17 @@ export default function SearchBar({ isLoading }: { isLoading: boolean }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listId = useId();
+  /** True while the box has focus, i.e. while the text belongs to the user. */
+  const editingRef = useRef(false);
 
-  useEffect(() => setText(query), [query]);
+  // Mirror the store into the box (chips, map exploration, a restored session),
+  // but never while the user is typing: "Explore as I move" rewrites the query
+  // every time the map settles, and that was overwriting half-typed words —
+  // typing "kakunodate" ended up as "Kyoto (prefecture)" mid-word.
+  useEffect(() => {
+    if (editingRef.current) return;
+    setText(query);
+  }, [query]);
 
   const trimmed = text.trim();
   const popular = useMemo(popularSuggestions, []);
@@ -212,7 +221,15 @@ export default function SearchBar({ isLoading }: { isLoading: boolean }) {
               setOpen(true);
               setActive(-1);
             }}
-            onFocus={() => setOpen(true)}
+            onFocus={() => {
+              editingRef.current = true;
+              setOpen(true);
+            }}
+            onBlur={() => {
+              // Hand ownership of the text back to the store, but keep what was
+              // typed on screen — clicking away should not silently rewrite it.
+              editingRef.current = false;
+            }}
             onKeyDown={onKeyDown}
             placeholder={t('search_placeholder')}
             autoComplete="off"
@@ -222,9 +239,7 @@ export default function SearchBar({ isLoading }: { isLoading: boolean }) {
             aria-expanded={panelOpen}
             aria-controls={listId}
             aria-autocomplete="list"
-            aria-activedescendant={
-              panelOpen && active >= 0 ? `${listId}-opt-${active}` : undefined
-            }
+            aria-activedescendant={activeId}
           />
           {text && (
             <button
@@ -244,9 +259,19 @@ export default function SearchBar({ isLoading }: { isLoading: boolean }) {
         </form>
 
         {panelOpen && (
-          <ul className="sb-typeahead__panel" id={listId} role="listbox" aria-label={t('search_suggestions')}>
+          <ul
+            className="sb-typeahead__panel"
+            id={listId}
+            role="listbox"
+            aria-label={tx('search_suggestions')}
+            aria-busy={busy}
+          >
+            {/* Results for the previous keystroke stay on screen while the next
+                lookup runs (blanking the list on every letter is worse), so the
+                header carries the "still working" signal instead. */}
             <li className="sb-typeahead__head" aria-hidden="true">
-              {showPopular ? t('search_popular') : t('search_suggestions')}
+              {showPopular ? tx('search_popular') : tx('search_suggestions')}
+              {busy && <span className="sb-typeahead__spinner" />}
             </li>
             {list.map((s, i) => (
               <li key={s.id} role="presentation">
@@ -280,7 +305,9 @@ export default function SearchBar({ isLoading }: { isLoading: boolean }) {
             ))}
             {!showPopular && !list.length && (
               <li className="sb-typeahead__note">
-                {busy ? t('search_searching') : `${t('search_no_matches')} “${trimmed}”`}
+                {busy
+                  ? tx('search_searching')
+                  : `${tx('search_no_matches')} “${trimmed}”`}
               </li>
             )}
           </ul>
@@ -288,7 +315,7 @@ export default function SearchBar({ isLoading }: { isLoading: boolean }) {
 
         <p className="sb-typeahead__sr" role="status" aria-live="polite">
           {panelOpen && !showPopular && !busy
-            ? `${list.length} ${t('search_suggestions')}`
+            ? `${list.length} ${tx('search_suggestions')}`
             : ''}
         </p>
       </div>

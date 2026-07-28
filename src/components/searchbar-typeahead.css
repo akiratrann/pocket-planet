@@ -28,12 +28,39 @@
 }
 
 .sb-typeahead__head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   padding: 6px 10px 4px;
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--ink-soft);
+}
+
+/* Sits in the header, not over the rows: the list keeps the previous query's
+   results while the next lookup runs, so the spinner must not imply they are gone. */
+.sb-typeahead__spinner {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-top-color: var(--accent);
+  animation: sb-typeahead-spin 0.7s linear infinite;
+}
+
+@keyframes sb-typeahead-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Respect a reduced-motion preference: hold a static ring instead of spinning. */
+@media (prefers-reduced-motion: reduce) {
+  .sb-typeahead__spinner {
+    animation: none;
+  }
 }
 
 .sb-typeahead__option {

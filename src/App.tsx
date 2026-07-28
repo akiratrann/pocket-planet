@@ -1,24 +1,85 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import './App.css';
-import MapView from './components/MapView';
 import SearchBar from './components/SearchBar';
 import CategoryBar from './components/CategoryBar';
 import DestinationList from './components/DestinationList';
 import DestinationDetail from './components/DestinationDetail';
-import AdvicePanel from './components/AdvicePanel';
-import LearningPanel from './components/LearningPanel';
-import ItineraryPanel from './components/ItineraryPanel';
-import TravelPanel from './components/TravelPanel';
 import BuildProgress from './components/BuildProgress';
 import LanguageSelector from './components/LanguageSelector';
 import AuthWidget from './components/AuthWidget';
 import ChatWidget from './components/ChatWidget';
-import PinsPanel from './components/PinsPanel';
 import { useGuide } from './hooks/useGuide';
 import { useAppStore } from './store/useAppStore';
 import { useI18n } from './i18n';
 import { CATEGORIES } from './data/categories';
 import type { CategoryId, Destination } from './types';
+
+/* ---------- Deferred code ----------
+ *
+ * Everything below is split out of the entry bundle. The app opens on the
+ * Explore tab, so that is the only panel worth paying for up front; a reader in
+ * Vietnam pulling bytes from a single machine in California should not wait on
+ * the itinerary editor or the flashcard engine to see the first list of places.
+ *
+ * DestinationDetail and DestinationList deliberately stay eager: they ARE the
+ * Explore tab, and DestinationList imports DestinationDetail's PlacePhoto /
+ * RankProvenance anyway, so splitting it would move zero bytes off the critical
+ * path while adding a spinner between a tap and the place you tapped.
+ *
+ * Each loader is a named function, not an inline arrow, so the tab buttons can
+ * call it on hover to start the fetch before the click lands (see `prefetch`).
+ */
+
+// maplibre-gl is by far the largest dependency, and the map is scenery behind
+// the panel — the panel text is what a user reads first. Loading it as a
+// separate chunk lets the panel paint while the map is still arriving. Its
+// stylesheet moves with it (out of the render-blocking main stylesheet) and is
+// requested in parallel with the module rather than chained after it.
+const loadMapView = () => {
+  const styles = import('maplibre-gl/dist/maplibre-gl.css');
+  const mod = import('./components/MapView');
+  return styles.then(() => mod);
+};
+const loadAdvicePanel = () => import('./components/AdvicePanel');
+const loadItineraryPanel = () => import('./components/ItineraryPanel');
+const loadTravelPanel = () => import('./components/TravelPanel');
+const loadLearningPanel = () => import('./components/LearningPanel');
+const loadPinsPanel = () => import('./components/PinsPanel');
+
+const MapView = lazy(loadMapView);
+const AdvicePanel = lazy(loadAdvicePanel);
+const ItineraryPanel = lazy(loadItineraryPanel);
+const TravelPanel = lazy(loadTravelPanel);
+const LearningPanel = lazy(loadLearningPanel);
+const PinsPanel = lazy(loadPinsPanel);
+
+/**
+ * Start a chunk download on hover/focus, before the click.
+ *
+ * The gap between "pointer enters the tab" and "pointer clicks the tab" is
+ * usually enough to hide the fetch entirely on a decent link, and is a real
+ * head start on a bad one. Repeat calls are free — the module registry
+ * de-duplicates in-flight imports.
+ */
+const prefetch = (load: () => Promise<unknown>) => () => {
+  void load();
+};
+
+/**
+ * Suspense fallback for a lazily-loaded panel.
+ *
+ * Reuses the `.status` / `.spinner` markup BuildProgress already uses for the
+ * guide fetch, so a chunk arriving looks like data arriving instead of a new
+ * kind of blank. It occupies the same block the panel will, which keeps the
+ * swap from shifting the layout underneath a reader.
+ */
+function PanelFallback() {
+  return (
+    <div className="status" aria-busy="true">
+      <div className="spinner" />
+    </div>
+  );
+}
 
 const MIN_W = 330;
 const MAX_W = 720;
@@ -184,21 +245,27 @@ export default function App() {
 
   return (
     <div className={'app' + (dragging ? ' app--dragging' : '')}>
-      <MapView
-        guide={guide}
-        destinations={mapDestinations}
-        selectedId={selectedId}
-        hoveredId={hoveredId}
-        onSelect={select}
-        autoExplore={autoExplore}
-        onExplore={(place) => exploreTo(place)}
-        onExploringChange={setExploring}
-        allCategories={active.size === 0}
-        frameOnLoad={frameOnLoad}
-        lang={lang}
-        routeGeometry={routeGeometry}
-        itineraryOrder={itineraryOrder}
-      />
+      {/* The fallback is the map's own container box, empty. The map is a
+          full-bleed backdrop, so a spinner here would be a full-screen spinner
+          over content that is already readable; an empty box holds the exact
+          space the canvas will fill and nothing moves when it arrives. */}
+      <Suspense fallback={<div className="map-container" />}>
+        <MapView
+          guide={guide}
+          destinations={mapDestinations}
+          selectedId={selectedId}
+          hoveredId={hoveredId}
+          onSelect={select}
+          autoExplore={autoExplore}
+          onExplore={(place) => exploreTo(place)}
+          onExploringChange={setExploring}
+          allCategories={active.size === 0}
+          frameOnLoad={frameOnLoad}
+          lang={lang}
+          routeGeometry={routeGeometry}
+          itineraryOrder={itineraryOrder}
+        />
+      </Suspense>
 
       <div className="map-controls">
         <button
@@ -221,6 +288,8 @@ export default function App() {
           <button
             className={'pins-open' + (pinned.length ? ' pins-open--has' : '')}
             onClick={() => setPinsOpen(true)}
+            onPointerEnter={prefetch(loadPinsPanel)}
+            onFocus={prefetch(loadPinsPanel)}
             aria-haspopup="dialog"
             title={t('pins_open')}
             aria-label={t('pins_open')}
@@ -274,24 +343,32 @@ export default function App() {
             <button
               className={'tab' + (panelTab === 'advice' ? ' tab--on' : '')}
               onClick={() => setPanelTab('advice')}
+              onPointerEnter={prefetch(loadAdvicePanel)}
+              onFocus={prefetch(loadAdvicePanel)}
             >
               💡 {t('tab_advice')}
             </button>
             <button
               className={'tab' + (panelTab === 'itinerary' ? ' tab--on' : '')}
               onClick={() => setPanelTab('itinerary')}
+              onPointerEnter={prefetch(loadItineraryPanel)}
+              onFocus={prefetch(loadItineraryPanel)}
             >
               🧳 {t('tab_itinerary')}
             </button>
             <button
               className={'tab' + (panelTab === 'travel' ? ' tab--on' : '')}
               onClick={() => setPanelTab('travel')}
+              onPointerEnter={prefetch(loadTravelPanel)}
+              onFocus={prefetch(loadTravelPanel)}
             >
               ✈️ {t('tab_travel')}
             </button>
             <button
               className={'tab' + (panelTab === 'learn' ? ' tab--on' : '')}
               onClick={() => setPanelTab('learn')}
+              onPointerEnter={prefetch(loadLearningPanel)}
+              onFocus={prefetch(loadLearningPanel)}
             >
               🧠 {t('tab_learn')}
             </button>
@@ -299,49 +376,56 @@ export default function App() {
         </div>
 
         <div className="panel__scroll">
-          {/* The itinerary belongs to its own destination, not to whatever is in
-              the search bar, so it renders regardless of guide loading state.
-              Gating it behind the search meant starting a new search replaced a
-              trip the user was editing with a "Building your guide…" spinner —
-              the data survived, but it read as though the trip had been wiped. */}
-          {panelTab === 'itinerary' ? (
-            <ItineraryPanel guide={guide} />
-          ) : (
-            <>
-              {isLoading && <BuildProgress query={query} />}
+          {/* One boundary around the whole tab body rather than one per panel:
+              only ever one tab is mounted, so a single fallback is enough, and
+              it lands in the same place the panel content would — no nested
+              spinners, no shifting. */}
+          <Suspense fallback={<PanelFallback />}>
+            {/* The itinerary belongs to its own destination, not to whatever is
+                in the search bar, so it renders regardless of guide loading
+                state. Gating it behind the search meant starting a new search
+                replaced a trip the user was editing with a "Building your
+                guide…" spinner — the data survived, but it read as though the
+                trip had been wiped. */}
+            {panelTab === 'itinerary' ? (
+              <ItineraryPanel guide={guide} />
+            ) : (
+              <>
+                {isLoading && <BuildProgress query={query} />}
 
-              {isError && (
-                <div className="status status--error">
-                  <p>
-                    {t('error_title')} “{query}”.
-                  </p>
-                  <p className="status__hint">{(error as Error)?.message ?? t('error_hint')}</p>
-                </div>
-              )}
+                {isError && (
+                  <div className="status status--error">
+                    <p>
+                      {t('error_title')} “{query}”.
+                    </p>
+                    <p className="status__hint">{(error as Error)?.message ?? t('error_hint')}</p>
+                  </div>
+                )}
 
-              {guide && !isLoading && (
-                <>
-                  {panelTab === 'explore' &&
-                    (selected ? (
-                      <DestinationDetail d={selected} location={guide.title} />
-                    ) : (
-                      <>
-                        <div className="panel__sticky">
-                          <CategoryBar counts={counts} />
-                        </div>
-                        <DestinationList
-                          destinations={visibleDestinations}
-                          location={guide.title}
-                        />
-                      </>
-                    ))}
-                  {panelTab === 'advice' && <AdvicePanel guide={guide} />}
-                  {panelTab === 'travel' && <TravelPanel guide={guide} />}
-                  {panelTab === 'learn' && <LearningPanel guide={guide} />}
-                </>
-              )}
-            </>
-          )}
+                {guide && !isLoading && (
+                  <>
+                    {panelTab === 'explore' &&
+                      (selected ? (
+                        <DestinationDetail d={selected} location={guide.title} />
+                      ) : (
+                        <>
+                          <div className="panel__sticky">
+                            <CategoryBar counts={counts} />
+                          </div>
+                          <DestinationList
+                            destinations={visibleDestinations}
+                            location={guide.title}
+                          />
+                        </>
+                      ))}
+                    {panelTab === 'advice' && <AdvicePanel guide={guide} />}
+                    {panelTab === 'travel' && <TravelPanel guide={guide} />}
+                    {panelTab === 'learn' && <LearningPanel guide={guide} />}
+                  </>
+                )}
+              </>
+            )}
+          </Suspense>
         </div>
 
         {!isMobile && panelOpen && (
@@ -356,7 +440,15 @@ export default function App() {
       </aside>
 
       <ChatWidget guide={guide} />
-      {pinsOpen && <PinsPanel />}
+      {/* No fallback: the pins dialog draws its own overlay and frame, so a
+          bare spinner would float unstyled over the map for the one frame it
+          takes to arrive. The 📌 button prefetches on hover, which in practice
+          means the chunk is already there by the time it is clicked. */}
+      {pinsOpen && (
+        <Suspense fallback={null}>
+          <PinsPanel />
+        </Suspense>
+      )}
     </div>
   );
 }

@@ -28,6 +28,34 @@ export default defineConfig({
   // it has to be emitted as one too — the default `iife` output cannot carry
   // those imports.
   worker: { format: 'es' },
+  build: {
+    rolldownOptions: {
+      output: {
+        // Split vendor code away from app code by how often it changes, not by
+        // what it does. App code changes on every deploy; maplibre and React do
+        // not. Left as one bundle, a one-line copy edit re-downloads ~1 MB for
+        // every returning visitor — which is worst exactly where it hurts most,
+        // on a slow link far from the single sjc machine that serves this.
+        //
+        // Groups are matched in order, first match wins, so the specific
+        // libraries are listed before the catch-all.
+        codeSplitting: {
+          groups: [
+            // The heavyweight. It is reached only through App.tsx's lazy
+            // MapView, so this chunk stays async — naming it just pins it to a
+            // stable, separately-cacheable file.
+            { name: 'maplibre', test: /node_modules[\\/]maplibre-gl[\\/]/ },
+            // React and its scheduler: needed for the very first paint, so this
+            // one is a static import of the entry — split for caching, not for
+            // deferral.
+            { name: 'react-vendor', test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/ },
+            { name: 'tanstack', test: /node_modules[\\/]@tanstack[\\/]/ },
+            { name: 'vendor', test: /node_modules[\\/]/ },
+          ],
+        },
+      },
+    },
+  },
   server: {
     // Bind to all interfaces so you can open the app on your phone (same Wi-Fi).
     host: true,

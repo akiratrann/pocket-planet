@@ -4,7 +4,7 @@ import { useAppStore, savedFromDestination } from '../store/useAppStore';
 import { useI18n } from '../i18n';
 import type { CategoryId, Destination } from '../types';
 import PinButton from './PinButton';
-import { PlacePhoto, RankProvenance } from './DestinationDetail';
+import { ATTRIB, PlacePhoto, RankProvenance } from './DestinationDetail';
 import './provenance.css';
 
 function DestinationCard({
@@ -50,7 +50,9 @@ function DestinationCard({
             className="scorebadge scorebadge--btn"
             onClick={onToggleWhy}
             aria-expanded={showWhy}
-            title={`${t('why_rank')} #${d.rank}?`}
+            // The bare number is the most misreadable thing on the card, so the
+            // hover text names its author before it names anything else.
+            title={`${d.score}/100 — ${ATTRIB.badgeTip}. ${t('why_rank')} #${d.rank}?`}
           >
             {d.score}
             <span className="scorebadge__cue" aria-hidden="true">

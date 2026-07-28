@@ -363,6 +363,70 @@ const NON_POI_SECTIONS = new Set([
   'destinations',
 ]);
 
+// Level-3 subsections whose listings are logistics, not places to go and see.
+//
+// Wikivoyage files practical information INSIDE an otherwise POI-bearing
+// section: cash machines live under "Buy → Money", clinics under "Cope →
+// Medical". Those listings were reaching the guide as shops, which is how two
+// bank branches ended up offered as things to do in Hoi An. Because splitSections
+// only cuts at level 2, the level-3 heading is the article's own statement of
+// what the listing is FOR — a far better signal than guessing from the name
+// (a rule keyed on "bank" would also strike London's South Bank).
+const NON_POI_SUBSECTIONS = new Set([
+  'money',
+  'atm',
+  'atms',
+  'bank',
+  'banks',
+  'banking',
+  'currency',
+  'currency exchange',
+  'exchange',
+  'changing money',
+  'post',
+  'postal',
+  'mail',
+  'internet',
+  'wifi',
+  'wi-fi',
+  'telephone',
+  'telephones',
+  'phone',
+  'laundry',
+  'medical',
+  'medical care',
+  'health',
+  'healthcare',
+  'emergency',
+  'embassies',
+  'consulates',
+  'toilets',
+  'luggage',
+  'left luggage',
+]);
+
+/**
+ * Cut a level-2 section body into its lead plus level-3 subsections. Level-4 and
+ * deeper stay attached to their parent, so a "Money" block is skipped whole.
+ */
+function splitSubsections(body: string): Array<{ title: string; text: string }> {
+  const headingRe = /^===\s*([^=].*?)\s*===\s*$/gm;
+  const heads: Array<{ title: string; start: number; end: number }> = [];
+  let m: RegExpExecArray | null;
+  while ((m = headingRe.exec(body)) !== null) {
+    heads.push({ title: m[1].trim().toLowerCase(), start: m.index, end: m.index + m[0].length });
+  }
+  if (!heads.length) return [{ title: '', text: body }];
+  const parts: Array<{ title: string; text: string }> = [
+    { title: '', text: body.slice(0, heads[0].start) },
+  ];
+  for (let i = 0; i < heads.length; i++) {
+    const end = i + 1 < heads.length ? heads[i + 1].start : body.length;
+    parts.push({ title: heads[i].title, text: body.slice(heads[i].end, end) });
+  }
+  return parts;
+}
+
 /** Parse every POI listing out of a single article's wikitext (section-aware). */
 function parseListings(wikitext: string): Destination[] {
   const { sections } = splitSections(wikitext);
@@ -384,7 +448,10 @@ function parseListings(wikitext: string): Destination[] {
   for (const [title, body] of Object.entries(sections)) {
     if (NON_POI_SECTIONS.has(title)) continue;
     sawAllowedSection = true;
-    collect(body);
+    for (const sub of splitSubsections(body)) {
+      if (NON_POI_SUBSECTIONS.has(sub.title)) continue;
+      collect(sub.text);
+    }
   }
 
   // Fallback for stub articles that lack standard sections.
