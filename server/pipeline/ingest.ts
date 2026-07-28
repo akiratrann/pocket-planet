@@ -3,6 +3,7 @@
 // backend (unlike a browser) can fetch arbitrary sites, so this is where "study
 // new resources on the web" happens.
 
+import { pinnedRequest } from '../net-guard.ts';
 import { getLLM } from '../llm/adapter.ts';
 import { store, type KbSource } from '../store.ts';
 import { guideLanguages } from './lang.ts';
@@ -93,19 +94,37 @@ function titleFromHtml(html: string, fallback: string): string {
   return m ? m[1].trim() : fallback;
 }
 
-async function fetchText(url: string): Promise<{ text: string; title: string }> {
-  const res = await fetch(url, {
-    headers: { 'User-Agent': 'PocketPlanet/1.0 (travel guide ingestion)' },
-  });
-  if (!res.ok) throw new Error(`fetch ${url} -> ${res.status}`);
-  const html = await res.text();
-  return { text: stripHtml(html), title: titleFromHtml(html, url) };
+/**
+ * Fetch a page over a connection pinned to an already-vetted address.
+ *
+ * The caller (server/index.ts) resolves the hostname, checks every answer
+ * against the block-list, and walks the redirect chain before we get here.
+ * Re-resolving now would reopen the exact hole that check exists to close, so
+ * the vetted address travels with the URL. See server/net-guard.ts.
+ */
+async function fetchTextPinned(
+  url: string,
+  pinnedAddress: string,
+): Promise<{ text: string; title: string }> {
+  const res = await pinnedRequest(url, pinnedAddress, { readBody: true });
+  if (res.status < 200 || res.status >= 300) throw new Error(`fetch ${url} -> ${res.status}`);
+  return { text: stripHtml(res.body), title: titleFromHtml(res.body, url) };
 }
 
-/** Ingest a single explicit URL for a location. */
-export async function ingestUrl(location: string, url: string): Promise<KbSource> {
+/**
+ * Ingest a single explicit URL for a location.
+ *
+ * `pinnedAddress` is the IP the caller already vetted, and is required: the
+ * connection is dialled at that address rather than re-resolving the hostname,
+ * which is what closes the DNS-rebinding window between vetting and fetching.
+ */
+export async function ingestUrl(
+  location: string,
+  url: string,
+  pinnedAddress: string,
+): Promise<KbSource> {
   const llm = getLLM();
-  const { text, title } = await fetchText(url);
+  const { text, title } = await fetchTextPinned(url, pinnedAddress);
   const [summary, pois] = await Promise.all([
     llm.summarizeLocation(location, text),
     llm.extractPOIs(location, text),

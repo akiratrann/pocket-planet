@@ -11,7 +11,7 @@ import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { lookup } from 'node:dns/promises';
-import { BlockList, isIP } from 'node:net';
+import { isIP } from 'node:net';
 import Fastify from 'fastify';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import cors from '@fastify/cors';
@@ -23,6 +23,7 @@ import { assembleGuide } from './assemble.ts';
 import { store } from './store.ts';
 import { applyFeedback, type Feedback, type FeedbackKind } from '../src/core/learning.ts';
 import { ingestUrl, ingestLocationAuto, ingestAllTracked } from './pipeline/ingest.ts';
+import { isBlockedAddress, pinnedRequest, URL_REFUSED } from './net-guard.ts';
 import { runTuning } from './pipeline/tuning.ts';
 import { runTraining } from './pipeline/train.ts';
 import { answerTravelQuestion, type ChatRequest } from './pipeline/chat.ts';
@@ -203,45 +204,23 @@ app.get('/api/capabilities', async (req) => {
 // services on loopback, the private VPC. Deny-list the addresses that are only
 // reachable from the inside, and judge the RESOLVED address, because
 // `http://localhost/` and an attacker-controlled name with an A record of
-// 127.0.0.1 are the same attack wearing different hats.
-const BLOCKED_NETS = new BlockList();
-// IPv4
-BLOCKED_NETS.addSubnet('0.0.0.0', 8, 'ipv4'); // "this network"
-BLOCKED_NETS.addSubnet('10.0.0.0', 8, 'ipv4'); // private
-BLOCKED_NETS.addSubnet('100.64.0.0', 10, 'ipv4'); // carrier-grade NAT
-BLOCKED_NETS.addSubnet('127.0.0.0', 8, 'ipv4'); // loopback
-BLOCKED_NETS.addSubnet('169.254.0.0', 16, 'ipv4'); // link-local + cloud metadata
-BLOCKED_NETS.addSubnet('172.16.0.0', 12, 'ipv4'); // private
-BLOCKED_NETS.addSubnet('192.0.0.0', 24, 'ipv4'); // IETF protocol assignments
-BLOCKED_NETS.addSubnet('192.168.0.0', 16, 'ipv4'); // private
-BLOCKED_NETS.addSubnet('198.18.0.0', 15, 'ipv4'); // benchmarking
-BLOCKED_NETS.addSubnet('224.0.0.0', 4, 'ipv4'); // multicast
-BLOCKED_NETS.addSubnet('240.0.0.0', 4, 'ipv4'); // reserved + 255.255.255.255
-// IPv6
-BLOCKED_NETS.addAddress('::', 'ipv6'); // unspecified
-BLOCKED_NETS.addAddress('::1', 'ipv6'); // loopback
-BLOCKED_NETS.addSubnet('fc00::', 7, 'ipv6'); // unique-local
-BLOCKED_NETS.addSubnet('fe80::', 10, 'ipv6'); // link-local
-BLOCKED_NETS.addSubnet('ff00::', 8, 'ipv6'); // multicast
-
-const URL_REFUSED =
-  'That URL is not allowed. Only public http(s) addresses can be studied.';
-
-function isBlockedAddress(raw: string): boolean {
-  const ip = raw.replace(/^\[/, '').replace(/\]$/, '').split('%')[0]; // brackets + zone id
-  const family = isIP(ip);
-  if (family === 4) return BLOCKED_NETS.check(ip, 'ipv4');
-  if (family === 6) {
-    // ::ffff:127.0.0.1 dials the IPv4 loopback, so judge the embedded address.
-    const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(ip);
-    if (mapped && isIP(mapped[1]) === 4) return BLOCKED_NETS.check(mapped[1], 'ipv4');
-    return BLOCKED_NETS.check(ip, 'ipv6');
-  }
-  return true; // not an address we can reason about → refuse
+// 127.0.0.1 are the same attack wearing different hats. The block-list and the
+// pinned dialler both live in ./net-guard.ts so the vetting here and the fetch
+// in the ingester cannot drift apart.
+/** Parse + vet one URL. Throws with a caller-safe message; never leaks internals. */
+/** A vetted URL together with the exact address it was vetted at. */
+export interface VettedTarget {
+  url: string;
+  address: string;
 }
 
-/** Parse + vet one URL. Throws with a caller-safe message; never leaks internals. */
-async function vetUrl(raw: string): Promise<URL> {
+/**
+ * Parse + vet one URL. Throws with a caller-safe message; never leaks internals.
+ *
+ * Returns the address alongside the URL because the caller must dial *that*
+ * address rather than resolve the name a second time — see net-guard.ts.
+ */
+async function vetUrl(raw: string): Promise<{ u: URL; address: string }> {
   let u: URL;
   try {
     u = new URL(raw);
@@ -259,7 +238,7 @@ async function vetUrl(raw: string): Promise<URL> {
   // becomes 127.0.0.1) before we get here.
   if (isIP(host)) {
     if (isBlockedAddress(host)) throw new Error(URL_REFUSED);
-    return u;
+    return { u, address: host };
   }
   let addrs: Array<{ address: string }>;
   try {
@@ -268,44 +247,39 @@ async function vetUrl(raw: string): Promise<URL> {
     throw new Error(`Could not resolve ${host}.`);
   }
   // ALL answers must be public: a name with both a public and a loopback record
-  // is a rebinding attempt, and we have no say over which one fetch() picks.
+  // is a rebinding attempt, and pinning only commits us to the one we pick.
   if (!addrs.length || addrs.some((a) => isBlockedAddress(a.address))) {
     throw new Error(URL_REFUSED);
   }
-  return u;
+  return { u, address: addrs[0].address };
 }
 
 const MAX_REDIRECTS = 5;
 
 /**
- * Vet the URL *and every hop it redirects through*, returning the final URL for
- * the ingester to fetch. Without this the address checks are trivially bypassed:
- * an attacker points us at their own public host, which 302s to
- * http://169.254.169.254/… and the ingester's own redirect-following fetch walks
- * right into it.
+ * Vet the URL *and every hop it redirects through*, returning the final URL and
+ * the address it was vetted at. Without this the address checks are trivially
+ * bypassed: an attacker points us at their own public host, which 302s to
+ * http://169.254.169.254/… and a redirect-following fetch walks right into it.
  *
- * Residual risk: the name is resolved here and again by the ingester, so a DNS
- * record that flips between the two lookups (rebinding) can still slip past.
- * Closing that needs the fetch itself pinned to the vetted IP, which lives in
- * server/pipeline/ingest.ts.
+ * Every request — the redirect probes here and the ingester's body fetch — is
+ * dialled at the address that hop was vetted at, so a DNS record that flips
+ * between the check and the fetch has nothing left to poison.
  */
-async function resolveIngestTarget(raw: string): Promise<string> {
-  let current = await vetUrl(raw);
+async function resolveIngestTarget(raw: string): Promise<VettedTarget> {
+  let { u: current, address } = await vetUrl(raw);
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-    let res: Response;
+    let res: Awaited<ReturnType<typeof pinnedRequest>>;
     try {
-      res = await fetch(current, {
-        redirect: 'manual',
-        headers: { 'User-Agent': 'PocketPlanet/1.0 (travel guide ingestion)' },
-      });
-    } catch {
+      res = await pinnedRequest(current.href, address);
+    } catch (e) {
+      // A refusal is the guard talking and must reach the caller verbatim;
+      // anything else is an ordinary network failure.
+      if ((e as Error).message === URL_REFUSED) throw e;
       throw new Error(`Could not fetch ${current.href}.`);
     }
-    // We only wanted the status line; don't hold the socket open for the body.
-    await res.body?.cancel().catch(() => undefined);
-    const location = res.status >= 300 && res.status < 400 ? res.headers.get('location') : null;
-    if (!location) return current.href;
-    current = await vetUrl(new URL(location, current).href);
+    if (!res.location) return { url: current.href, address };
+    ({ u: current, address } = await vetUrl(new URL(res.location, current).href));
   }
   throw new Error('Too many redirects.');
 }
@@ -359,7 +333,7 @@ app.post<{ Body: { location: string; url?: string } }>('/api/ingest', async (req
 
   // Vet BEFORE tracking, so a rejected URL doesn't leave the location queued
   // for the scheduler as a side effect.
-  let target: string | undefined;
+  let target: VettedTarget | undefined;
   if (url) {
     try {
       target = await resolveIngestTarget(url);
@@ -370,7 +344,9 @@ app.post<{ Body: { location: string; url?: string } }>('/api/ingest', async (req
 
   await store.track(location);
   try {
-    const src = target ? await ingestUrl(location, target) : await ingestLocationAuto(location);
+    const src = target
+      ? await ingestUrl(location, target.url, target.address)
+      : await ingestLocationAuto(location);
     if (!src) return reply.code(502).send({ error: 'Nothing could be ingested for that location' });
     return { ok: true, source: { title: src.title, url: src.url, poiCount: src.pois.length, provider: src.provider } };
   } catch (err) {
