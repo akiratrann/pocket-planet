@@ -154,6 +154,10 @@ export default function SearchBar({ isLoading }: { isLoading: boolean }) {
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    // While an IME is composing (Japanese, Korean, Chinese…) the arrows move
+    // through candidate words and Enter confirms one. Stealing those keys would
+    // submit "きょ" the moment the user picked a candidate.
+    if (e.nativeEvent.isComposing) return;
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
       if (!open) {
