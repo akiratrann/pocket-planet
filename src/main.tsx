@@ -1,10 +1,15 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-// maplibre's stylesheet is NOT imported here on purpose. Anything imported from
-// the entry lands in the one render-blocking stylesheet, so importing it here
-// made the panel's first paint wait on CSS that only styles the map's controls.
-// It now travels with the lazily-loaded MapView chunk (see App.tsx).
+// This import must stay here, eagerly, and must stay ABOVE the app's own
+// stylesheets. maplibre ships `.maplibregl-map { position: relative }`, which
+// collides with App.css's `.map-container { position: absolute; inset: 0 }` at
+// equal specificity — so whichever stylesheet loads last wins. Deferring it into
+// the lazy MapView chunk (which appends its <link> at runtime, i.e. last) makes
+// maplibre win, the map collapses to zero height, and you get a blank map with
+// no error anywhere. The ~10 kB gzip it costs the critical path is the price of
+// that cascade order; the JS is where the real weight was.
+import 'maplibre-gl/dist/maplibre-gl.css';
 import './index.css';
 import App from './App.tsx';
 import { useAppStore } from './store/useAppStore';

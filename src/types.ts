@@ -47,6 +47,21 @@ export interface Destination {
   order: number;
   /** Human-readable reasons the item scored the way it did (for transparency + tuning). */
   reasons: string[];
+  /**
+   * How many times each source provider's text names this place, e.g.
+   * `{ "Lonely Planet": 3, "Reddit": 12 }`. These are literal name matches over
+   * real source summaries: evidence that a place is TALKED ABOUT, not that
+   * anyone recommended it. Present it as "mentioned 12 times", never as
+   * "recommended by".
+   */
+  mentions?: Record<string, number>;
+  /**
+   * The boost those mentions actually contributed to `score`. Kept separate from
+   * `mentions` because providers are weighted differently (a Lonely Planet
+   * mention counts for four Stack Exchange ones), so folding the weighting into
+   * the counts would make "12 mentions" mean a different thing per source.
+   */
+  mentionScore?: number;
 }
 
 export interface AdviceSection {
@@ -80,7 +95,14 @@ export interface GuideMeta {
   provider: string;
   learnedVersion: number;
   feedbackApplied: number;
-  sources: Array<{ title: string; url: string; fetchedAt: number; poiCount: number }>;
+  sources: Array<{
+    title: string;
+    url: string;
+    /** Publisher the source came from ("Lonely Planet", "Reddit", "YouTube"…). */
+    provider: string;
+    fetchedAt: number;
+    poiCount: number;
+  }>;
   ingestedPois: number;
   /** What travellers say (positive + negative), grounded in real sources. */
   opinions?: LocationOpinions;

@@ -19,6 +19,19 @@ function copyLandingPage() {
   }
 }
 
+// Match a dependency's JavaScript but never its stylesheets.
+//
+// A chunk group swallows every module whose id matches, CSS included — and CSS
+// that lands in an async chunk is appended to <head> at runtime, i.e. LAST in
+// the cascade. maplibre's stylesheet must load before App.css or its
+// `.maplibregl-map { position: relative }` beats `.map-container { position:
+// absolute; inset: 0 }` at equal specificity and the map renders at zero height
+// with no error to show for it (see src/main.tsx). Keeping stylesheets out of
+// the groups leaves them in the entry's one stylesheet, in import order.
+function packageJs(pkg: RegExp) {
+  return (id: string) => !id.endsWith('.css') && pkg.test(id)
+}
+
 // https://vite.dev/config/
 export default defineConfig({
   // maplibre-gl v6 ships its own worker; let it resolve normally instead of
@@ -44,13 +57,16 @@ export default defineConfig({
             // The heavyweight. It is reached only through App.tsx's lazy
             // MapView, so this chunk stays async — naming it just pins it to a
             // stable, separately-cacheable file.
-            { name: 'maplibre', test: /node_modules[\\/]maplibre-gl[\\/]/ },
+            { name: 'maplibre', test: packageJs(/node_modules[\\/]maplibre-gl[\\/]/) },
             // React and its scheduler: needed for the very first paint, so this
             // one is a static import of the entry — split for caching, not for
             // deferral.
-            { name: 'react-vendor', test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/ },
-            { name: 'tanstack', test: /node_modules[\\/]@tanstack[\\/]/ },
-            { name: 'vendor', test: /node_modules[\\/]/ },
+            {
+              name: 'react-vendor',
+              test: packageJs(/node_modules[\\/](react|react-dom|scheduler)[\\/]/),
+            },
+            { name: 'tanstack', test: packageJs(/node_modules[\\/]@tanstack[\\/]/) },
+            { name: 'vendor', test: packageJs(/node_modules[\\/]/) },
           ],
         },
       },

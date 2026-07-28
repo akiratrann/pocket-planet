@@ -116,15 +116,45 @@ function inScript(text: string, script: RegExp): boolean {
   return hits / letters.length >= 0.5;
 }
 
+/** Could this text be in `lang`? Negative signal only — see the note above. */
+function looksForeign(text: string, lang: string): boolean {
+  return !inScript(text, LANG_SCRIPT[lang] ?? LATIN);
+}
+
 function isForeignText(d: Destination, lang: string): boolean {
   if (!d.description) return false;
   const from = sourceLangOf(d.id);
   if (from) return from !== lang;
-  return !inScript(d.description, LANG_SCRIPT[lang] ?? LATIN);
+  return looksForeign(d.description, lang);
 }
 
 interface WpExtracts {
-  query?: { pages?: Array<{ title: string; extract?: string }> };
+  query?: {
+    normalized?: Array<{ from: string; to: string }>;
+    redirects?: Array<{ from: string; to: string }>;
+    pages?: Array<{ title: string; extract?: string }>;
+  };
+}
+
+/**
+ * MediaWiki answers under the title it RESOLVED, not the one we asked for: a
+ * title gets unicode/underscore-normalised, and a redirect is followed. Wikidata
+ * sitelinks do point at redirects (an article gets renamed, the sitelink lags),
+ * so looking the answer up under the requested title would silently come back
+ * empty — indistinguishable from "this language has no article", which drops us
+ * to the local-language last resort while a perfectly good translation exists.
+ * Walking the alias chain back keeps every requested title able to find its text.
+ */
+function keyByRequested<T>(requested: string[], resolved: Map<string, T>, alias: Map<string, string>): Map<string, T> {
+  const out = new Map<string, T>();
+  for (const title of requested) {
+    let cur = title;
+    // Bounded: normalisation then redirect is two hops; the cap stops a cycle.
+    for (let i = 0; i < 4 && !resolved.has(cur) && alias.has(cur); i++) cur = alias.get(cur)!;
+    const value = resolved.get(cur);
+    if (value !== undefined) out.set(title, value);
+  }
+  return out;
 }
 
 /** Lead sentences of each article from the reader's own Wikipedia edition. */
@@ -141,16 +171,21 @@ async function extracts(lang: string, titles: string[]): Promise<Map<string, str
           explaintext: '1',
           exsentences: '3',
           exlimit: '20',
+          redirects: '1',
           titles: part.join('|'),
           format: 'json',
           formatversion: '2',
           origin: '*',
         }).toString(),
     );
+    const byResolved = new Map<string, string>();
     for (const p of data?.query?.pages ?? []) {
       const text = (p.extract ?? '').trim();
-      if (text) out.set(p.title, text);
+      if (text) byResolved.set(p.title, text);
     }
+    const alias = new Map<string, string>();
+    for (const r of [...(data?.query?.normalized ?? []), ...(data?.query?.redirects ?? [])]) alias.set(r.from, r.to);
+    for (const [title, text] of keyByRequested(part, byResolved, alias)) out.set(title, text);
   }
   return out;
 }
@@ -216,9 +251,25 @@ export async function localizeNames(destinations: Destination[], lang: string): 
     const name = local.label ?? local.article;
     if (name) d.name = name;
     if (!isForeignText(d, lang)) continue;
+
+    // Descriptions, best source FIRST — the reader's own language is preferred
+    // at every rung, and the local-language text is only ever kept because both
+    // rungs came up empty, never because we stopped looking early:
+    //
+    //  1. the lead of the article in the reader's own Wikipedia edition, found
+    //     through this item's sitelink. Full, real prose, written by that
+    //     edition's editors — not a translation of the local one.
+    //  2. Wikidata's one-line description in the reader's language. Short, but
+    //     it exists for plenty of places no edition has an article for.
+    //  3. (implicit) keep the local-language text. A true sentence the reader
+    //     must paste into a translator still beats an empty card.
     const article = local.article ? lead.get(local.article) : undefined;
     const text = article ?? (local.description ? sentenceCase(local.description) : undefined);
-    if (text) d.description = text;
+    // Guard the swap: an edition occasionally holds a stub written in another
+    // language, and replacing foreign text with equally foreign text would cost
+    // us the one thing the original had going for it — being the article the
+    // rest of this place's data (name, image, coordinates) came from.
+    if (text && !looksForeign(text, lang)) d.description = text;
   }
 }
 

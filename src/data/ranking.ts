@@ -30,6 +30,8 @@ export interface RankingWeights {
   /** Bonus per matched "prominence" keyword (UNESCO, iconic, must-see...). */
   notableKeywordBonus: number;
   notableKeywordCap: number;
+  /** Penalty when the NAME says the place is civic/utility, not an attraction. */
+  civicNamePenalty: number;
 }
 
 export const RANKING_WEIGHTS: RankingWeights = {
@@ -46,7 +48,88 @@ export const RANKING_WEIGHTS: RankingWeights = {
   earlyOrderBonus: 10,
   notableKeywordBonus: 5,
   notableKeywordCap: 20,
+  // Large enough to sink a civic building below every real sight in its
+  // category, small enough that it is a demotion and not a deletion.
+  civicNamePenalty: 45,
 };
+
+// ---------------------------------------------------------------------------
+// Civic / utility names.
+//
+// The authoritative relevance check is structured (Wikidata `instance of`, and
+// which subsection of the article a listing came from) and runs before ranking.
+// This is the LAST resort for the places that carry no structured data at all,
+// so it only ever DEMOTES: a keyword can be wrong, and burying a real attraction
+// is recoverable in a way that deleting it is not.
+//
+// Matched against the NAME only. Descriptions mention hospitals and schools as
+// landmarks all the time ("opposite the city hospital"), and penalising that
+// would hit the temple across the road instead of the hospital.
+//
+// Known limits: it is a fixed list in a handful of languages, so it says nothing
+// about the thousands of others; and any place whose own name contains one of
+// these words is demoted regardless of what it really is — which is why
+// ATTRACTION_RE below pardons the museum housed in an old post office.
+// ---------------------------------------------------------------------------
+const CIVIC_NAME_PATTERNS = [
+  // Education.
+  'elementary school', 'primary school', 'middle school', 'junior high school',
+  'high school', 'secondary school', 'special needs school', 'kindergarten',
+  'nursery school', 'driving school',
+  // Administration and public services.
+  'post office', 'city hall', 'town hall', 'village office', 'ward office',
+  'municipal office', 'prefectural office', 'city office', 'police station',
+  'police box', 'fire station', 'tax office', 'employment office',
+  // Health.
+  'hospital', 'clinic', 'health centre', 'health center', 'medical centre',
+  'medical center',
+  // Money.
+  'atm',
+  // Utilities and generic infrastructure.
+  'water treatment', 'sewage', 'power plant', 'power station', 'substation',
+  'landfill', 'incinerator', 'car park', 'parking lot', 'petrol station',
+  'gas station', 'filling station',
+];
+
+// Non-Latin and accented equivalents. JavaScript's \b is ASCII-only, so these
+// must be matched WITHOUT word boundaries (see the Latin/non-Latin split below).
+const CIVIC_NAME_PATTERNS_INTL = [
+  // Japanese: elementary / middle / high / special-needs school, post office,
+  // city + town hall, police + fire station, hospital, clinic.
+  '小学校', '中学校', '高等学校', '支援学校', '幼稚園', '郵便局', '市役所', '町役場',
+  '区役所', '警察署', '交番', '消防署', '病院', '診療所', '浄水場',
+  // Chinese.
+  '小学', '中学', '派出所', '医院', '邮局', '郵局',
+  // Korean.
+  '초등학교', '중학교', '고등학교', '우체국', '경찰서', '병원',
+  // Vietnamese.
+  'ngân hàng', 'bưu điện', 'trường tiểu học', 'trường trung học', 'bệnh viện',
+  'trạm y tế', 'ủy ban nhân dân',
+  // Thai.
+  'โรงเรียน', 'โรงพยาบาล',
+];
+
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+const CIVIC_RE = new RegExp(
+  '\\b(' + CIVIC_NAME_PATTERNS.map(escapeRe).map((k) => k.replace(/\s+/g, '[ -]')).join('|') + ')\\b',
+  'i',
+);
+const CIVIC_RE_INTL = new RegExp('(' + CIVIC_NAME_PATTERNS_INTL.map(escapeRe).join('|') + ')', 'i');
+
+// A civic word inside an attraction's name is usually part of its story, not its
+// function: the museum in the former post office, the memorial at the old
+// hospital. Any of these pardons the match outright.
+const ATTRACTION_RE =
+  /\b(museum|gallery|memorial|monument|shrine|temple|cathedral|basilica|church|mosque|synagogue|castle|palace|fort|fortress|ruins?|park|garden|beach|waterfall|onsen|spa|market|bazaar|theatre|theater|gallery|heritage|historic|historical|national\s+treasure)\b/i;
+
+/** Does the NAME say this is a civic/utility building rather than a sight? */
+export function looksCivic(name: string): boolean {
+  if (ATTRACTION_RE.test(name)) return false;
+  return CIVIC_RE.test(name) || CIVIC_RE_INTL.test(name);
+}
 
 export const DEFAULT_PROMINENCE_KEYWORDS = [
   'unesco',
@@ -175,6 +258,16 @@ function rawScore(
   if (buzzBoost) {
     score += buzzBoost;
     reasons.push('Recommended in trusted travel sources (Lonely Planet, Reddit, forums)');
+  }
+
+  // Applied last so it outweighs the signals that put civic buildings high in
+  // the first place: they have Wikidata entries and well-written articles, which
+  // is exactly what the rest of this function rewards.
+  if (looksCivic(d.name)) {
+    // Weights are persisted to disk and reloaded, so a state saved before this
+    // one existed has no value for it — fall back rather than score NaN.
+    score -= Number.isFinite(w.civicNamePenalty) ? w.civicNamePenalty : RANKING_WEIGHTS.civicNamePenalty;
+    reasons.push('Not a visitable attraction (civic or utility building)');
   }
 
   return { raw: Math.max(0, score), reasons };

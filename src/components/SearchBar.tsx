@@ -169,13 +169,20 @@ export default function SearchBar({ isLoading }: { isLoading: boolean }) {
         return next;
       });
     } else if (e.key === 'Enter') {
-      // Only intercept when a row is actually highlighted; otherwise the form
-      // submits the free-form text exactly as it did before the typeahead.
+      // Handle both Enter cases here rather than leaning on the browser's
+      // implicit form submission: this form has no submit button, so that path
+      // is fragile (it does not fire at all under synthetic key events, and the
+      // open dropdown makes it ambiguous). A highlighted row wins; otherwise the
+      // free-form text is submitted exactly as it was before the typeahead.
+      // The form's onSubmit stays for the other route in — a mobile keyboard's
+      // "Go" key fires submit without a keydown we can see.
+      e.preventDefault();
       if (open && active >= 0 && list[active]) {
-        e.preventDefault();
         choose(list[active]);
       } else {
         setOpen(false);
+        setActive(-1);
+        submit(text);
       }
     } else if (e.key === 'Escape') {
       if (open) {

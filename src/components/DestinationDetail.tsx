@@ -19,11 +19,14 @@ const SOURCE_PREVIEW = 4;
  * now, so they live here as local constants and fall back to English.
  * TODO: move to i18n
  */
-export const ATTRIB = {
+const ATTRIB = {
   /** The headline correction: a bare "80" badge otherwise reads as a verdict
    *  issued by whichever brand is named nearby. */
   scoreIs:
     'Pocket Planet’s own score, worked out by this app from the sources below — not a rating published by Lonely Planet, Reddit or any other source here.',
+  /** Kept in sync with BADGE_TIP in DestinationList.tsx — it is deliberately
+   *  duplicated rather than exported, so this module keeps exporting components
+   *  only. Both disappear when these strings move to i18n. */
   badgeTip: 'Pocket Planet’s own score, not a source’s rating',
   externalLabel: 'What outside sources said',
   /** Shown when the ranker flagged an outside mention. Says what we know AND

@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { sendFeedback } from '../data/api';
+import { fetchCapabilities, sendFeedback, type Capabilities } from '../data/api';
 import { CATEGORIES } from '../data/categories';
+import { useAppStore } from '../store/useAppStore';
+import { useI18n } from '../i18n';
 import type { CategoryId, Destination } from '../types';
 
 /**
@@ -17,7 +19,26 @@ export default function FeedbackControls({
   location: string;
 }) {
   const qc = useQueryClient();
+  const { t } = useI18n();
   const [status, setStatus] = useState<string | null>(null);
+  const [caps, setCaps] = useState<Capabilities | null>(null);
+  // Re-ask when the signed-in identity changes: logging in or out has to move
+  // these controls without a reload.
+  const authUser = useAppStore((s) => s.authUser);
+
+  useEffect(() => {
+    let live = true;
+    fetchCapabilities().then((c) => {
+      if (live) setCaps(c);
+    });
+    return () => {
+      live = false;
+    };
+  }, [authUser?.id]);
+
+  // Assume not permitted until the answer arrives — better a control that
+  // appears a moment late than one that appears and then 401s.
+  const canFeedback = caps?.canFeedback ?? false;
   const [busy, setBusy] = useState(false);
   const [showCats, setShowCats] = useState(false);
   const [note, setNote] = useState('');
@@ -32,16 +53,29 @@ export default function FeedbackControls({
       setStatus(`${label} · learned v${learnedVersion}`);
       refresh();
     } catch (e) {
-      setStatus(`Couldn't save (is the backend running?)`);
-      void e;
+      // Report what actually went wrong. This used to blame the backend being
+      // down, which became misleading once feedback started requiring an
+      // account: a 401 was shown to the user as a server outage.
+      setStatus((e as Error).message || t('feedback_failed'));
     } finally {
       setBusy(false);
     }
   }
 
+  // Writing feedback needs an account (the endpoint enforces it). Say so
+  // instead of offering controls that fail.
+  if (!canFeedback) {
+    return (
+      <div className="feedback">
+        <div className="feedback__title">🧠 {t('feedback_title')}</div>
+        <p className="feedback__signin">{t('feedback_signin')}</p>
+      </div>
+    );
+  }
+
   return (
     <div className="feedback">
-      <div className="feedback__title">🧠 Teach Pocket Planet</div>
+      <div className="feedback__title">🧠 {t('feedback_title')}</div>
       <div className="feedback__row">
         <button
           className="fbtn fbtn--up"

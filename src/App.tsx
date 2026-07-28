@@ -32,14 +32,12 @@ import type { CategoryId, Destination } from './types';
 
 // maplibre-gl is by far the largest dependency, and the map is scenery behind
 // the panel — the panel text is what a user reads first. Loading it as a
-// separate chunk lets the panel paint while the map is still arriving. Its
-// stylesheet moves with it (out of the render-blocking main stylesheet) and is
-// requested in parallel with the module rather than chained after it.
-const loadMapView = () => {
-  const styles = import('maplibre-gl/dist/maplibre-gl.css');
-  const mod = import('./components/MapView');
-  return styles.then(() => mod);
-};
+// separate chunk lets the panel paint while the map is still arriving.
+//
+// Only the JS moves. maplibre's stylesheet stays eagerly imported in main.tsx:
+// it has to load BEFORE App.css or it wins the cascade and flattens the map
+// container to zero height. See the comment there.
+const loadMapView = () => import('./components/MapView');
 const loadAdvicePanel = () => import('./components/AdvicePanel');
 const loadItineraryPanel = () => import('./components/ItineraryPanel');
 const loadTravelPanel = () => import('./components/TravelPanel');

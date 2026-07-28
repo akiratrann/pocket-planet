@@ -169,6 +169,14 @@ const SKIP_P31 = new Set<string>([
   'Q16917', // hospital
   'Q4260475', // medical facility
   'Q861951', // police station
+  'Q35054', // post office
+  'Q1195942', // fire station
+  // A municipal ball field is civic sports infrastructure, not a sight: nobody
+  // travels to it, and like the schools above it exists in exactly one language,
+  // so it is guaranteed to reach the reader as an untranslatable wall of text.
+  // (Stadiums people DO visit — Koshien, the Olympic venues — are tagged as
+  // stadium/arena classes, not as this plain municipal venue class.)
+  'Q595452', // baseball venue
   // Abolished administrative units. ADMIN_RE drops these when the article says
   // "is a village"; a dissolved one says "WAS a village", so it needs the class.
   'Q18663566', // dissolved municipality of Japan
@@ -353,6 +361,76 @@ async function overpassQuery(q: string): Promise<OverpassEl[]> {
   return [];
 }
 
+interface WdSitelinks {
+  entities?: Record<string, { sitelinks?: Record<string, { title?: string }> }>;
+}
+
+/**
+ * Wikidata ids for articles of one Wikipedia edition, keyed by article title.
+ * Asking Wikidata (rather than the edition's own pageprops) both resolves the
+ * title and hands back the id in a single batched call per language.
+ */
+async function qidsForArticles(lang: string, titles: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  // Guards the `sites`/`sitefilter` interpolation: editions are plain codes.
+  if (!/^[a-z]{2,3}$/.test(lang) || !titles.length) return out;
+  const site = `${lang}wiki`;
+  for (const part of chunk(titles, 45)) {
+    const data = await getJson<WdSitelinks>(
+      `${WIKIDATA}?` +
+        new URLSearchParams({
+          action: 'wbgetentities',
+          sites: site,
+          titles: part.join('|'),
+          props: 'sitelinks',
+          sitefilter: site,
+          format: 'json',
+          formatversion: '2',
+          origin: '*',
+        }).toString(),
+    );
+    for (const [qid, ent] of Object.entries(data?.entities ?? {})) {
+      // Titles Wikidata knows nothing about come back as a "-1" pseudo-entity.
+      if (!/^Q\d+$/.test(qid)) continue;
+      const title = ent.sitelinks?.[site]?.title;
+      if (title) out.set(title, qid);
+    }
+  }
+  return out;
+}
+
+/**
+ * Give OSM POIs a Wikidata id from their `wikipedia` tag ("ja:抱返神社").
+ *
+ * Localization is keyed entirely off the Wikidata id — that is what carries a
+ * place's name and article into the reader's language. A POI mapped with only a
+ * `wikipedia` tag (common: mappers add the article link long before anyone adds
+ * the `wikidata` one) was reaching the reader stuck in whatever language it was
+ * mapped in, even though the link to fix that was sitting in its tags. Costs one
+ * batched request per language, and only when such a POI actually exists.
+ */
+async function linkOsmToWikidata(pending: Array<[Destination, string]>): Promise<void> {
+  const byLang = new Map<string, Map<string, Destination[]>>();
+  for (const [dest, tag] of pending) {
+    const m = /^\s*([a-z]{2,3})\s*:\s*(.+?)\s*$/.exec(tag);
+    if (!m) continue;
+    const [, lang, raw] = m;
+    const title = raw.replace(/_/g, ' '); // MediaWiki treats "_" as a space
+    const titles = byLang.get(lang) ?? new Map<string, Destination[]>();
+    byLang.set(lang, titles);
+    const group = titles.get(title) ?? [];
+    group.push(dest);
+    titles.set(title, group);
+  }
+  for (const [lang, titles] of byLang) {
+    const qids = await qidsForArticles(lang, [...titles.keys()]);
+    for (const [title, group] of titles) {
+      const qid = qids.get(title);
+      if (qid) for (const d of group) d.wikidata ??= qid;
+    }
+  }
+}
+
 async function fetchOverpass(lat: number, lon: number, radius: number): Promise<Destination[]> {
   const wide = `(around:${radius},${lat},${lon})`;
   // Food/nightlife explode element counts in any town, which 504s the whole
@@ -372,8 +450,16 @@ async function fetchOverpass(lat: number, lon: number, radius: number): Promise<
     `);out center tags 250;`;
   const elements = await overpassQuery(q);
   const out: Destination[] = [];
+  // POIs carrying a `wikipedia` tag but no `wikidata` one, resolved in one batch
+  // below so each still has a route into the reader's language.
+  const pendingWikipedia: Array<[Destination, string]> = [];
   for (const el of elements) {
     const t = el.tags ?? {};
+    // `name:en` is the display default, not a claim that English is special:
+    // it is by far the best-populated non-local name tag in OSM, and anything
+    // that ends up with a Wikidata id is relabelled into the ACTUAL reader's
+    // language afterwards by localizeNames — which is why the tag resolution
+    // below matters more than which fallback name we start from.
     const raw = t['name:en'] || t.name;
     if (!raw) continue;
     // OSM names are free-form; title-case ones that are entirely lowercase.
@@ -390,7 +476,7 @@ async function fetchOverpass(lat: number, lon: number, radius: number): Promise<
     if (cat === 'sights') {
       for (const [re, kc] of KEYWORDS) if (re.test(name)) { category = kc; break; }
     }
-    out.push({
+    const dest: Destination = {
       id: `osm-${el.type}-${el.id}`,
       name,
       category,
@@ -404,8 +490,11 @@ async function fetchOverpass(lat: number, lon: number, radius: number): Promise<
       rank: 0,
       order: 0,
       reasons: ['Discovered via OpenStreetMap'],
-    });
+    };
+    if (!dest.wikidata && t.wikipedia) pendingWikipedia.push([dest, t.wikipedia]);
+    out.push(dest);
   }
+  await linkOsmToWikidata(pendingWikipedia);
   return out;
 }
 

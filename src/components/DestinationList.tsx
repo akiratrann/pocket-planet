@@ -4,8 +4,16 @@ import { useAppStore, savedFromDestination } from '../store/useAppStore';
 import { useI18n } from '../i18n';
 import type { CategoryId, Destination } from '../types';
 import PinButton from './PinButton';
-import { ATTRIB, PlacePhoto, RankProvenance } from './DestinationDetail';
+import { PlacePhoto, RankProvenance } from './DestinationDetail';
 import './provenance.css';
+
+/**
+ * The shortest form of the score attribution, for the badge's hover text. Most
+ * readers never open the panel, so this is the only place the bare number gets
+ * an author. Mirrors ATTRIB.badgeTip in DestinationDetail.tsx.
+ * TODO: move to i18n
+ */
+const BADGE_TIP = 'Pocket Planet’s own score, not a source’s rating';
 
 function DestinationCard({
   d,
@@ -52,7 +60,7 @@ function DestinationCard({
             aria-expanded={showWhy}
             // The bare number is the most misreadable thing on the card, so the
             // hover text names its author before it names anything else.
-            title={`${d.score}/100 — ${ATTRIB.badgeTip}. ${t('why_rank')} #${d.rank}?`}
+            title={`${d.score}/100 — ${BADGE_TIP}. ${t('why_rank')} #${d.rank}?`}
           >
             {d.score}
             <span className="scorebadge__cue" aria-hidden="true">

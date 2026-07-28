@@ -297,7 +297,11 @@ export const useAppStore = create<AppState>()(
       // the itinerary being wiped by the search.
       setQuery: (q) =>
         set({ query: q, selectedId: null, frameOnLoad: true, panelTab: 'explore' }),
-      exploreTo: (q) => set({ query: q, selectedId: null, frameOnLoad: false }),
+      // Map-driven loads also belong on Explore: clicking a city label while
+      // reading Advice should show that city's places, not leave you on a tab
+      // describing somewhere else.
+      exploreTo: (q) =>
+        set({ query: q, selectedId: null, frameOnLoad: false, panelTab: 'explore' }),
       setLanguage: (lang) => {
         if (typeof window !== 'undefined') localStorage.setItem('pp-lang', lang);
         set({ language: lang });

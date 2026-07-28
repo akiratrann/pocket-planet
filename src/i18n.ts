@@ -49,6 +49,10 @@ const en: Dict = {
     'Studying a new web resource adds places to this guide for everyone, so it needs an account. Log in to contribute.',
   learn_train_admin:
     'Training rewrites the ranking used for every destination, so only administrators can start a pass. It also runs automatically on a schedule.',
+  feedback_title: 'Teach Pocket Planet',
+  feedback_signin:
+    'Corrections here change the rankings everyone sees, so they need an account. Log in to help improve this guide.',
+  feedback_failed: 'Couldn’t save that correction.',
   filters: 'Filters',
   clear: 'Clear',
   itinerary_untitled: 'Untitled trip',

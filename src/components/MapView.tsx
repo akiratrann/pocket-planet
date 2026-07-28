@@ -54,6 +54,23 @@ const ENGLISH_LABEL = [
 ] as unknown as ExpressionSpecification;
 
 /**
+ * The style's `place` source-layer labels — cities, towns, provinces, countries.
+ * Taken from Liberty's layer ids; a layer that is absent is simply not matched,
+ * so an upstream rename degrades to "clicking does nothing" rather than an error.
+ */
+const PLACE_LABEL_LAYERS = [
+  'label_country_1',
+  'label_country_2',
+  'label_country_3',
+  'label_state',
+  'label_city_capital',
+  'label_city',
+  'label_town',
+  'label_village',
+  'label_other',
+];
+
+/**
  * Repoint every name-bearing symbol layer at the English label expression.
  * Layers keyed off `ref` (motorway shields) are left alone — a road number is
  * already language-neutral, and rewriting it would blank the shields.
@@ -311,6 +328,32 @@ export default function MapView({
     // `style.load` fires before the first symbol layout, so labels are drawn in
     // English from the very first frame rather than flashing local script.
     map.on('style.load', () => forceEnglishLabels(map));
+    // Clicking a place LABEL searches it. The basemap already names every city,
+    // province and country under the cursor, so making those names live turns
+    // the map itself into navigation — the alternative is reading a name off
+    // the map and retyping it into the search box.
+    //
+    // Only the `place` source-layer is wired up: roads, parks and POI labels are
+    // not destinations this app can build a guide for, and making them look
+    // clickable would promise something we can't deliver.
+    map.on('click', (e) => {
+      const hits = map.queryRenderedFeatures(e.point, { layers: PLACE_LABEL_LAYERS });
+      const props = hits[0]?.properties as Record<string, unknown> | undefined;
+      if (!props) return;
+      // Same preference order as the label the user actually clicked, so we
+      // search for the text they saw rather than the local-script name.
+      const name = ['name_en', 'name:latin', 'name_int', 'name']
+        .map((k) => props[k])
+        .find((v): v is string => typeof v === 'string' && v.trim().length > 0);
+      if (name) onExploreRef.current?.(name.trim());
+    });
+
+    // A label under the cursor should look clickable.
+    map.on('mousemove', (e) => {
+      const over = map.queryRenderedFeatures(e.point, { layers: PLACE_LABEL_LAYERS }).length > 0;
+      map.getCanvas().style.cursor = over ? 'pointer' : '';
+    });
+
     map.on('load', () => {
       loadedRef.current = true;
       renderMarkers();
