@@ -17,6 +17,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
 import compress from '@fastify/compress';
+import rateLimit from '@fastify/rate-limit';
 import cron from 'node-cron';
 import { assembleGuide } from './assemble.ts';
 import { store } from './store.ts';
@@ -36,8 +37,63 @@ import type { User, UserData } from './store.ts';
 // Identify + rate-limit ourselves to Wikimedia before any scraping starts.
 installUpstreamFetch();
 
-const app = Fastify({ logger: { level: 'warn' } });
-await app.register(cors, { origin: true });
+const app = Fastify({
+  logger: { level: 'warn' },
+  // On Fly every request arrives from the edge proxy, so the socket address is
+  // the proxy's for all of them. Without this `req.ip` is one shared value and
+  // the per-IP rate limits below would throttle the entire world as a single
+  // client. `1` = trust exactly one hop, i.e. the address Fly's proxy appended;
+  // trusting *all* hops would let a caller forge X-Forwarded-For and shed the
+  // limit. Locally there is no proxy header, so this is a no-op.
+  trustProxy: Number(process.env.TRUST_PROXY ?? 1),
+});
+
+// CORS used to be `origin: true`, which reflects whatever Origin is offered —
+// i.e. any website a user visits could call this API from their browser. The
+// only browsers that need cross-origin access are the Vite dev server and the
+// deployed app itself, so name them.
+const ALLOWED_ORIGINS = new Set(
+  (process.env.ALLOWED_ORIGINS ??
+    'https://pocket-planet.fly.dev,http://localhost:5173,http://127.0.0.1:5173')
+    .split(',')
+    .map((o) => o.trim().replace(/\/$/, ''))
+    .filter(Boolean),
+);
+
+await app.register(cors, {
+  origin(origin, cb) {
+    // No Origin header: same-origin navigations, curl, native apps. These are
+    // not what CORS defends against, and refusing them would break the PWA
+    // (which is served from this very origin).
+    if (!origin) return cb(null, true);
+    cb(null, ALLOWED_ORIGINS.has(origin.replace(/\/$/, '')));
+  },
+});
+
+// Nothing was rate limited, so /api/auth/login could be guessed at line speed
+// and every endpoint was a free amplifier. Limits are per client IP.
+await app.register(rateLimit, {
+  global: true,
+  max: Number(process.env.RATE_LIMIT_MAX ?? 300),
+  timeWindow: '1 minute',
+  // Static PWA assets are served from this same origin; a cold load pulls
+  // dozens of them and they cost nothing to serve. Only meter the API.
+  allowList: (req) => !(req.raw.url ?? '').startsWith('/api'),
+  // statusCode is required here — without it the plugin's error serialises as a
+  // generic 500 and clients can't tell "slow down" from "the server broke".
+  // `error` matches the shape every other endpoint returns.
+  errorResponseBuilder: (_req, ctx) => ({
+    statusCode: 429,
+    error: `Too many requests — try again in ${Math.ceil(ctx.ttl / 1000)}s`,
+  }),
+});
+
+// Credential endpoints get their own, far tighter budget: online password
+// guessing needs thousands of attempts to be worth anything, and no honest user
+// signs in ten times in a quarter of an hour.
+const AUTH_RATE_LIMIT = {
+  rateLimit: { max: Number(process.env.AUTH_RATE_LIMIT_MAX ?? 10), timeWindow: '15 minutes' },
+};
 
 // Guide payloads are ~330KB of JSON and were being sent uncompressed, which is
 // most of the wait on a slow or distant connection. gzip/brotli takes that to
@@ -419,6 +475,7 @@ const emptyData = (): UserData => ({ pinned: [], itineraries: [], updatedAt: 0 }
 
 app.post<{ Body: { email?: string; password?: string; name?: string } }>(
   '/api/auth/signup',
+  { config: AUTH_RATE_LIMIT },
   async (req, reply) => {
     const email = (req.body?.email ?? '').trim().toLowerCase();
     const password = req.body?.password ?? '';
@@ -430,7 +487,7 @@ app.post<{ Body: { email?: string; password?: string; name?: string } }>(
       id: randomUUID(),
       email,
       name,
-      pass: hashPassword(password),
+      pass: await hashPassword(password),
       createdAt: Date.now(),
       data: emptyData(),
     };
@@ -439,15 +496,19 @@ app.post<{ Body: { email?: string; password?: string; name?: string } }>(
   },
 );
 
-app.post<{ Body: { email?: string; password?: string } }>('/api/auth/login', async (req, reply) => {
-  const email = (req.body?.email ?? '').trim().toLowerCase();
-  const password = req.body?.password ?? '';
-  const user = await store.getUserByEmail(email);
-  if (!user || !verifyPassword(password, user.pass)) {
-    return reply.code(401).send({ error: 'Incorrect email or password' });
-  }
-  return { token: signToken(user.id), user: publicUser(user), data: user.data };
-});
+app.post<{ Body: { email?: string; password?: string } }>(
+  '/api/auth/login',
+  { config: AUTH_RATE_LIMIT },
+  async (req, reply) => {
+    const email = (req.body?.email ?? '').trim().toLowerCase();
+    const password = req.body?.password ?? '';
+    const user = await store.getUserByEmail(email);
+    if (!user || !(await verifyPassword(password, user.pass))) {
+      return reply.code(401).send({ error: 'Incorrect email or password' });
+    }
+    return { token: signToken(user.id), user: publicUser(user), data: user.data };
+  },
+);
 
 app.get('/api/auth/me', async (req, reply) => {
   const uid = userIdFromAuthHeader(req.headers.authorization);

@@ -24,15 +24,24 @@ export function getAuthToken(): string | null {
 }
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const sentToken = authToken;
   const res = await fetch(`${API}${path}`, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
-      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+      ...(sentToken ? { Authorization: `Bearer ${sentToken}` } : {}),
       ...init?.headers,
     },
   });
   if (!res.ok) {
+    // A token we actually sent came back rejected: it's expired or invalid, so
+    // stop keeping it around. Sessions are stateless, so this is the only place
+    // a dead credential gets cleaned out of storage. `/auth/*` is excluded — a
+    // mistyped password there 401s without saying anything about the session
+    // the user may already have.
+    if (res.status === 401 && sentToken && !path.startsWith('/auth/')) {
+      setAuthToken(null);
+    }
     const body = await res.json().catch(() => ({}));
     throw new Error((body as { error?: string }).error ?? `API ${res.status}`);
   }

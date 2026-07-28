@@ -5,7 +5,8 @@
 // be stored server-side and they survive restarts as long as the secret does.
 // The signing secret is generated once and persisted under the data dir.
 
-import { randomBytes, scryptSync, timingSafeEqual, createHmac } from 'node:crypto';
+import { randomBytes, scrypt, timingSafeEqual, createHmac } from 'node:crypto';
+import { promisify } from 'node:util';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,7 +14,20 @@ import { fileURLToPath } from 'node:url';
 const DATA_DIR = join(dirname(fileURLToPath(import.meta.url)), '.data');
 const SECRET_FILE = join(DATA_DIR, 'auth-secret');
 
-const TOKEN_TTL_MS = 60 * 24 * 60 * 60 * 1000; // 60 days
+// These tokens are bearer credentials kept in the browser, and there is no
+// server-side session list to revoke them from — so a stolen one is valid until
+// it expires. 60 days made that a two-month window; a week keeps "stay signed
+// in" honest while bounding the damage. Override for a deployment that wants
+// stricter (or looser) sessions.
+const TOKEN_TTL_MS = Number(process.env.AUTH_TOKEN_TTL_HOURS ?? 24 * 7) * 60 * 60 * 1000;
+
+// Promisified so hashing runs on the libuv threadpool instead of blocking the
+// event loop — see hashPassword below.
+const scryptAsync = promisify(scrypt) as (
+  password: string,
+  salt: string,
+  keylen: number,
+) => Promise<Buffer>;
 
 function loadSecret(): string {
   try {
@@ -33,16 +47,22 @@ const SECRET = process.env.AUTH_SECRET || loadSecret();
 // ---------------------------------------------------------------------------
 // Passwords
 // ---------------------------------------------------------------------------
-export function hashPassword(password: string): string {
+// scrypt is deliberately expensive (~100ms here) — that cost is what makes the
+// stored hashes hard to crack. The SYNC variant charges that cost to the event
+// loop, so the whole server froze for the duration of every signup and every
+// login attempt, and a handful of concurrent guesses was enough to take the app
+// down. The async form hands the work to the libuv threadpool, so the process
+// keeps serving guides while it hashes.
+export async function hashPassword(password: string): Promise<string> {
   const salt = randomBytes(16).toString('hex');
-  const hash = scryptSync(password, salt, 64).toString('hex');
+  const hash = (await scryptAsync(password, salt, 64)).toString('hex');
   return `${salt}:${hash}`;
 }
 
-export function verifyPassword(password: string, stored: string): boolean {
+export async function verifyPassword(password: string, stored: string): Promise<boolean> {
   const [salt, hash] = stored.split(':');
   if (!salt || !hash) return false;
-  const candidate = scryptSync(password, salt, 64);
+  const candidate = await scryptAsync(password, salt, 64);
   const expected = Buffer.from(hash, 'hex');
   return candidate.length === expected.length && timingSafeEqual(candidate, expected);
 }
