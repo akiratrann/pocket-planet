@@ -1,15 +1,24 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { CATEGORY_MAP } from '../data/categories';
 import {
   useAppStore,
   savedFromDestination,
   type Itinerary,
-  type LegMode,
   type SavedPlace,
 } from '../store/useAppStore';
 import { useGuide } from '../hooks/useGuide';
 import { useI18n } from '../i18n';
 import type { Guide } from '../types';
+// The distance/estimate model is shared with the Travel tab so both places
+// describe the same leg identically. It is pure, dependency-free arithmetic —
+// see the header of that file for why it lives next to the link providers.
+import {
+  estimateLeg,
+  greatCircleKm,
+  modesForKm,
+  tierForKm,
+  type TravelMode,
+} from '../../server/pipeline/travel-links.ts';
 
 /** Shape returned by GET /api/route — see server/pipeline/routing.ts. */
 interface RouteResponse {
@@ -21,19 +30,97 @@ interface RouteResponse {
   approximate?: boolean;
 }
 
-const LEG_MODES: Array<{ id: LegMode; icon: string }> = [
-  { id: 'walking', icon: '🚶' },
-  { id: 'cycling', icon: '🚲' },
-  { id: 'driving', icon: '🚗' },
-  { id: 'transit', icon: '🚆' },
-];
+/** Shape returned by GET /api/travel-options — see server/pipeline/travel-links.ts. */
+interface TravelOption {
+  id: string;
+  provider: string;
+  label: string;
+  description: string;
+  url: string;
+  prefilled: boolean;
+  offer?: {
+    operator: string;
+    departISO: string;
+    arriveISO: string;
+    durationSec: number;
+    changes: number;
+    price?: { amount: number; currency: string };
+    deepLink: string;
+    fetchedAt: number;
+    source: string;
+  };
+}
 
-const MODE_ICON: Record<LegMode, string> = {
+const MODE_ICON: Record<TravelMode, string> = {
   walking: '🚶',
   cycling: '🚲',
   driving: '🚗',
-  transit: '🚆',
+  transit: '🚇',
+  train: '🚆',
+  bus: '🚌',
+  flight: '✈️',
 };
+
+// TODO: move to i18n — src/i18n.ts is owned by another change right now, so the
+// strings that intercity travel adds are English-only constants for the moment.
+const EN = {
+  train: 'Train',
+  bus: 'Bus',
+  flight: 'Flight',
+  est: 'est.',
+  estimateNote: 'Estimated from the real distance — not a quoted fare or timetable.',
+  noEstimate: 'timetabled',
+  checkingRoad: 'Checking whether a road connects these…',
+  noLandRoute: 'No road route connects these two stops, so only flying is offered.',
+  bookHeading: 'Book or check live times',
+  bookNote: 'These open the operator’s own site — that is where real prices and seats are.',
+  bookLoading: 'Finding booking options…',
+  straightLine: 'straight-line',
+  byRoad: 'by road',
+  apart: 'apart',
+};
+
+/** Modes that follow tarmac, so a measured road distance applies to them. */
+const ROAD: ReadonlySet<TravelMode> = new Set(['driving', 'bus']);
+
+/**
+ * Beyond this the road probe is not worth making: nothing on land is offered
+ * at that range anyway (see MODE_RANGE_KM), and asking a public router for a
+ * 2000 km car route mostly just times out.
+ */
+const ROAD_PROBE_MAX_KM = 1500;
+
+/**
+ * `LegMode` in src/store/useAppStore.ts predates intercity travel and only
+ * knows walking/cycling/driving/transit; that file belongs to another change,
+ * so a train/bus/flight leg is persisted as `transit` (all three are "someone
+ * else's timetable") and the mode the traveller actually picked is kept here,
+ * keyed by trip + stop pair. Without this the chip would silently say "Transit"
+ * for a flight after a reload.
+ */
+type ScheduledPick = 'train' | 'bus' | 'flight';
+const SCHEDULED_KEY = 'pp.leg-scheduled-mode.v1';
+
+function readScheduledMap(): Record<string, ScheduledPick> {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(SCHEDULED_KEY) ?? '{}');
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeScheduledMode(key: string, mode: ScheduledPick | null): void {
+  try {
+    const map = readScheduledMap();
+    if (mode) map[key] = mode;
+    else delete map[key];
+    localStorage.setItem(SCHEDULED_KEY, JSON.stringify(map));
+  } catch {
+    // Storage can be unavailable (private mode, quota). The leg still works;
+    // its chip just falls back to the generic "Transit" label.
+  }
+}
 
 function formatDuration(sec: number): string {
   const mins = Math.round(sec / 60);
@@ -41,6 +128,11 @@ function formatDuration(sec: number): string {
   const h = Math.floor(mins / 60);
   const m = mins % 60;
   return m ? `${h} hr ${m} min` : `${h} hr`;
+}
+
+/** Distances shrink to one decimal only when they're small enough to matter. */
+function formatKm(km: number): string {
+  return km >= 100 ? `${Math.round(km)} km` : `${km.toFixed(1)} km`;
 }
 
 function hasCoords(p: SavedPlace): boolean {
@@ -62,8 +154,17 @@ function PlaceThumb({ p }: { p: SavedPlace }) {
 /**
  * The connector between two consecutive stops. Collapsed it's a slim bar; open
  * it offers the travel modes and, once one is picked, the leg is stored on the
- * itinerary. Transit is a Google Maps hand-off (no free global transit routing
- * — same reason TravelPanel deep-links it) so it carries no in-app duration.
+ * itinerary.
+ *
+ * Which modes are offered depends on how far apart the two stops actually are
+ * (great-circle from their coordinates, refined by a real road distance when
+ * the router answers). Offering "Walk" between two cities was worse than
+ * useless — it was the one option guaranteed to be wrong.
+ *
+ * Modes we cannot route (transit, train, bus, flight) are shown with a travel
+ * time computed from that distance and labelled as an estimate. Nothing here is
+ * a fare or a departure time; those live behind the clearly-separated booking
+ * links, which is where real inventory is.
  */
 function LegBar({ itin, from, to }: { itin: Itinerary; from: SavedPlace; to: SavedPlace }) {
   const { t } = useI18n();
@@ -72,26 +173,150 @@ function LegBar({ itin, from, to }: { itin: Itinerary; from: SavedPlace; to: Sav
   const setRouteGeometry = useAppStore((s) => s.setRouteGeometry);
 
   const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState<LegMode | null>(null);
+  const [busy, setBusy] = useState<TravelMode | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // null = not probed / unknown, true = a road connects them, false = it doesn't.
+  const [landRoute, setLandRoute] = useState<boolean | null>(null);
+  const [probing, setProbing] = useState(false);
+  const [roadKm, setRoadKm] = useState<number | null>(null);
+  const [options, setOptions] = useState<TravelOption[] | null>(null);
+
+  const legKey = `${itin.id}|${from.id}|${to.id}`;
+  const [pick, setPick] = useState<ScheduledPick | null>(() => readScheduledMap()[legKey] ?? null);
 
   const leg = itin.legs.find((l) => l.fromId === from.id && l.toId === to.id) ?? null;
   const routable = hasCoords(from) && hasCoords(to);
+
+  const straightKm = useMemo(
+    () =>
+      routable
+        ? greatCircleKm({ lat: from.lat!, lon: from.lon! }, { lat: to.lat!, lon: to.lon! })
+        : 0,
+    [routable, from.lat, from.lon, to.lat, to.lon],
+  );
+  const tier = tierForKm(straightKm);
+  const modes = useMemo(
+    () => (routable ? modesForKm(straightKm, { landRoute }) : []),
+    [routable, straightKm, landRoute],
+  );
+
   const transitUrl =
     `https://www.google.com/maps/dir/?api=1&origin=${from.lat},${from.lon}` +
     `&destination=${to.lat},${to.lon}&travelmode=transit`;
 
-  async function choose(mode: LegMode) {
+  /** Place names are what booking sites want, and the city beats the venue. */
+  const bookFrom = from.location || from.name;
+  const bookTo = to.location || to.name;
+
+  // Two things we can only learn from the network, and only for a leg the user
+  // has actually opened: whether a road connects the stops at all (a failed car
+  // route across open water is what tells us this is a flight-only leg), and
+  // the real road distance, which sharpens the driving and coach estimates.
+  //
+  // The "already asked" flag is a ref, not state, on purpose: as state it would
+  // be an effect dependency, so setting it would re-run the effect, whose
+  // cleanup would then cancel the very request it had just started — the probe
+  // spun forever without ever applying its answer.
+  const probeStarted = useRef(false);
+  useEffect(() => {
+    if (!open || !routable || tier === 'local') return;
+    if (probeStarted.current) return;
+    probeStarted.current = true;
+    if (straightKm > ROAD_PROBE_MAX_KM) {
+      // Too far for anything on land to be on offer anyway — don't ask.
+      setLandRoute(false);
+      return;
+    }
+    let cancelled = false;
+    setProbing(true);
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/route?from=${from.lat},${from.lon}&to=${to.lat},${to.lon}&mode=driving`,
+          { cache: 'no-store' },
+        );
+        if (!res.ok) throw new Error('probe failed');
+        const data: RouteResponse = await res.json();
+        if (cancelled) return;
+        // `approximate` means the router could not connect them and fell back
+        // to a straight line — in practice, water in the way.
+        setLandRoute(!data.approximate);
+        if (!data.approximate) setRoadKm(data.distanceKm);
+      } catch {
+        // A network failure is not evidence of an ocean: leave it unknown so
+        // ground modes stay on offer rather than being wrongly withdrawn.
+        if (!cancelled) setLandRoute(null);
+      } finally {
+        if (!cancelled) setProbing(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, routable, tier, straightKm, from.lat, from.lon, to.lat, to.lon]);
+
+  // Booking hand-offs for an intercity leg. Fetched only when the picker is
+  // open, and rendered under its own heading so it can't be mistaken for
+  // something we computed.
+  useEffect(() => {
+    if (!open || tier === 'local' || options !== null) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const params = new URLSearchParams({ from: bookFrom, to: bookTo });
+        const res = await fetch(`/api/travel-options?${params}`, { cache: 'no-store' });
+        if (!cancelled) setOptions(res.ok ? await res.json() : []);
+      } catch {
+        if (!cancelled) setOptions([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, tier, options, bookFrom, bookTo]);
+
+  /** The four original modes have translations; the intercity three do not yet. */
+  const modeLabel = (m: TravelMode): string =>
+    m === 'train' ? EN.train : m === 'bus' ? EN.bus : m === 'flight' ? EN.flight : t('mode_' + m);
+
+  const estimateFor = (m: TravelMode) =>
+    estimateLeg(m, straightKm, ROAD.has(m) && roadKm !== null ? roadKm : undefined);
+
+  async function choose(mode: TravelMode) {
     if (!routable) return;
 
+    // Train / bus / flight: there is no router for these, so what gets stored
+    // is our own computed estimate, flagged as approximate. The specific mode
+    // goes to the side table because LegMode can't hold it (see above).
+    if (mode === 'train' || mode === 'bus' || mode === 'flight') {
+      const est = estimateFor(mode);
+      writeScheduledMode(legKey, mode);
+      setPick(mode);
+      setItineraryLeg(itin.id, {
+        fromId: from.id,
+        toId: to.id,
+        mode: 'transit',
+        distanceKm: est.km,
+        durationSec: est.durationSec ?? 0,
+        approximate: true,
+      });
+      setOpen(false);
+      return;
+    }
+
     if (mode === 'transit') {
-      window.open(transitUrl, '_blank', 'noopener,noreferrer');
+      // Local transit still has no free global routing API, so the schedule
+      // itself comes from Google Maps. Unlike before, we don't hijack the tab
+      // on selection — the hand-off is a link on the leg the user can take.
+      writeScheduledMode(legKey, null);
+      setPick(null);
       setItineraryLeg(itin.id, {
         fromId: from.id,
         toId: to.id,
         mode,
-        distanceKm: 0,
+        distanceKm: straightKm,
         durationSec: 0,
+        approximate: true,
       });
       setOpen(false);
       return;
@@ -105,9 +330,13 @@ function LegBar({ itin, from, to }: { itin: Itinerary; from: SavedPlace; to: Sav
       );
       if (!res.ok) throw new Error('no route');
       const data: RouteResponse = await res.json();
+      writeScheduledMode(legKey, null);
+      setPick(null);
       setItineraryLeg(itin.id, {
         fromId: from.id,
         toId: to.id,
+        // Narrowed to walking/cycling/driving by the early returns above, which
+        // is exactly the routable subset of LegMode.
         mode,
         distanceKm: data.distanceKm,
         durationSec: data.durationSec,
@@ -124,24 +353,36 @@ function LegBar({ itin, from, to }: { itin: Itinerary; from: SavedPlace; to: Sav
     }
   }
 
+  function drop() {
+    writeScheduledMode(legKey, null);
+    setPick(null);
+    removeItineraryLeg(itin.id, from.id, to.id);
+  }
+
+  // What the chip shows: the stored mode, except that a stored `transit` may
+  // really have been a train, coach or flight.
+  const shown: TravelMode | null = leg ? (leg.mode === 'transit' ? (pick ?? 'transit') : leg.mode) : null;
+
   return (
     <li className="leg">
       <div className="leg__rail" aria-hidden />
-      {leg ? (
+      {leg && shown ? (
         <div className="leg__bar leg__bar--set">
           <button className="leg__summary" onClick={() => setOpen((v) => !v)}>
-            <span>{MODE_ICON[leg.mode]}</span>
-            <strong>{t('mode_' + leg.mode)}</strong>
-            {leg.mode === 'transit' ? (
-              <span className="leg__note">{t('transit_gmaps')}</span>
+            <span>{MODE_ICON[shown]}</span>
+            <strong>{modeLabel(shown)}</strong>
+            {shown === 'transit' ? (
+              <span className="leg__note">
+                {formatKm(leg.distanceKm)} · {t('transit_gmaps')}
+              </span>
             ) : (
               <span className="leg__note">
-                {formatDuration(leg.durationSec)} · {leg.distanceKm.toFixed(1)} km
-                {leg.approximate ? ` · ${t('transport_approx')}` : ''}
+                {formatDuration(leg.durationSec)}
+                {leg.approximate ? ` ${EN.est}` : ''} · {formatKm(leg.distanceKm)}
               </span>
             )}
           </button>
-          {leg.mode === 'transit' && (
+          {shown === 'transit' && (
             <a
               className="leg__x"
               href={transitUrl}
@@ -155,7 +396,7 @@ function LegBar({ itin, from, to }: { itin: Itinerary; from: SavedPlace; to: Sav
           )}
           <button
             className="leg__x"
-            onClick={() => removeItineraryLeg(itin.id, from.id, to.id)}
+            onClick={drop}
             title={t('transport_remove')}
             aria-label={t('transport_remove')}
           >
@@ -169,22 +410,75 @@ function LegBar({ itin, from, to }: { itin: Itinerary; from: SavedPlace; to: Sav
           disabled={!routable}
           title={routable ? t('add_transport') : t('transport_no_coords')}
         >
-          {busy ? `⏳ ${t('transport_finding')}` : `＋ ${t('add_transport')}`}
+          {busy
+            ? `⏳ ${t('transport_finding')}`
+            : `＋ ${t('add_transport')}` +
+              (routable ? ` · ${formatKm(straightKm)} ${EN.apart}` : '')}
         </button>
       )}
 
       {open && (
-        <div className="leg__modes">
-          {LEG_MODES.map((m) => (
-            <button
-              key={m.id}
-              className={'leg__mode' + (leg?.mode === m.id ? ' leg__mode--on' : '')}
-              onClick={() => choose(m.id)}
-              disabled={busy !== null}
-            >
-              {m.icon} {t('mode_' + m.id)}
-            </button>
-          ))}
+        <div className="leg__picker">
+          <p className="leg__dist">
+            {formatKm(roadKm ?? straightKm)} {roadKm !== null ? EN.byRoad : EN.straightLine}
+            {probing ? ` · ${EN.checkingRoad}` : ''}
+          </p>
+
+          <div className="leg__modes">
+            {modes.map((m) => {
+              const est = estimateFor(m);
+              return (
+                <button
+                  key={m}
+                  className={'leg__mode' + (shown === m ? ' leg__mode--on' : '')}
+                  onClick={() => choose(m)}
+                  disabled={busy !== null}
+                  title={est.assumption}
+                >
+                  <span className="leg__modename">
+                    {MODE_ICON[m]} {modeLabel(m)}
+                  </span>
+                  <span className="leg__modeest">
+                    {est.durationSec === null
+                      ? EN.noEstimate
+                      : `~${formatDuration(est.durationSec)} ${EN.est}`}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {landRoute === false && straightKm <= ROAD_PROBE_MAX_KM && (
+            <p className="leg__err">{EN.noLandRoute}</p>
+          )}
+          <p className="leg__estnote">{EN.estimateNote}</p>
+
+          {tier !== 'local' && (
+            <div className="leg__book">
+              <h5 className="leg__bookh">{EN.bookHeading}</h5>
+              {options === null ? (
+                <p className="leg__estnote">{EN.bookLoading}</p>
+              ) : options.length === 0 ? null : (
+                <>
+                  <ul className="leg__booklist">
+                    {options.map((o) => (
+                      <li key={o.id}>
+                        <a
+                          className="leg__booklink"
+                          href={o.offer?.deepLink ?? o.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          {o.label} <span className="leg__bookprov">{o.provider} ↗</span>
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="leg__estnote">{EN.bookNote}</p>
+                </>
+              )}
+            </div>
+          )}
         </div>
       )}
       {error && <p className="leg__err">{error}</p>}

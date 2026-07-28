@@ -2612,3 +2612,200 @@ a.opinions__src:hover {
   font-weight: 800;
   color: var(--ink-soft);
 }
+
+/* ---------- Intercity travel: computed estimates vs. booking hand-offs ------
+   Appended by the intercity-travel change. The visual job of this block is one
+   thing above all: a traveller must never mistake a number we worked out for a
+   price or a departure somebody is actually offering. Hence the two badges —
+   "Calculated here" on a tinted card, "Booking sites" on a plain one — and the
+   assumption printed under every estimate rather than hidden in a tooltip. */
+
+.travel__dest {
+  margin: 0 0 4px;
+}
+
+.travel__blockh {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.travel__badge {
+  padding: 3px 8px;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.travel__badge--calc {
+  color: #1d4e2f;
+  background: #d9efdf;
+}
+
+.travel__badge--link {
+  color: var(--ink-soft);
+  background: var(--line);
+}
+
+.travel__computed {
+  padding: 12px 13px;
+  background: color-mix(in srgb, #d9efdf 32%, #fff);
+  border: 1px solid color-mix(in srgb, #1d4e2f 18%, transparent);
+  border-radius: 12px;
+}
+
+.travel__linkblock {
+  display: flex;
+  flex-direction: column;
+}
+
+.travel__ests {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.travel__est {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 1px 10px;
+  padding: 9px 11px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.travel__est-mode {
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--ink);
+}
+
+.travel__est-time {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.travel__est-basis,
+.travel__est-note {
+  grid-column: 1 / -1;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--ink-soft);
+}
+
+.travel__est-note {
+  font-style: italic;
+}
+
+/* ---- Itinerary leg picker ---- */
+
+.leg__picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 6px 0 2px 26px;
+  padding: 10px 11px;
+  background: var(--panel-bg);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.leg__dist {
+  margin: 0;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+
+/* Each mode button now carries its own estimate, so it stacks instead of
+   sitting on one line. Scoped under .leg__modes rather than restyling
+   .leg__mode, so the original pill rule is left untouched. */
+.leg__modes .leg__mode {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  text-align: left;
+  border-radius: 10px;
+}
+
+.leg__modename {
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.leg__modeest {
+  font-size: 10.5px;
+  opacity: 0.8;
+  font-variant-numeric: tabular-nums;
+}
+
+.leg__estnote {
+  margin: 0;
+  font-size: 11px;
+  font-style: italic;
+  line-height: 1.45;
+  color: var(--ink-soft);
+}
+
+.leg__book {
+  padding-top: 8px;
+  border-top: 1px dashed var(--line);
+}
+
+.leg__bookh {
+  margin: 0 0 6px;
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.leg__booklist {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 0 0 6px;
+  padding: 0;
+  list-style: none;
+}
+
+.leg__booklink {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 9px;
+  font-size: 12.5px;
+  color: var(--ink);
+  text-decoration: none;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+
+.leg__booklink:hover {
+  border-color: var(--accent);
+}
+
+.leg__bookprov {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--ink-soft);
+}

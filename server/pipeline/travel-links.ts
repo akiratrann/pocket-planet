@@ -357,25 +357,33 @@ const DETOUR_FACTOR: Record<TravelMode, number> = {
  * Average door-to-door speed in km/h, banded by distance because a mode's
  * average speed is not constant: a 5 km drive is stop-start city traffic, a
  * 500 km drive is mostly motorway. Bands are [maxKm, kmh].
+ *
+ * These are deliberately conservative. The same 600 km by rail is three hours
+ * on a high-speed line and fifteen on an older one, and we have no way to know
+ * which this route has. Erring slow means the estimate reads as the "allow
+ * about this long" figure it is, rather than promising a journey nobody can
+ * book. The numbers were sanity-checked against real routed answers — a
+ * 780 km road route the router put at 11 hr 25 min (≈68 km/h) lands inside
+ * the driving band below.
  */
 const SPEED_BANDS: Record<Exclude<TravelMode, 'transit' | 'flight'>, Array<[number, number]>> = {
   walking: [[Infinity, 4.8]],
   cycling: [[Infinity, 15]],
   driving: [
-    [10, 26], // urban
-    [80, 55], // A-roads / ring roads
-    [400, 78], // mostly motorway
-    [Infinity, 88],
+    [10, 24], // urban, stop-start
+    [80, 50], // A-roads and ring roads
+    [400, 68], // mostly motorway, with breaks
+    [Infinity, 72],
   ],
   train: [
-    [100, 65], // regional stopping services
-    [400, 95],
-    [Infinity, 110], // long-distance / high-speed
+    [100, 55], // regional stopping services
+    [400, 70],
+    [Infinity, 80], // conventional long-distance; high-speed lines beat this
   ],
   bus: [
-    [100, 45],
-    [400, 60],
-    [Infinity, 65],
+    [100, 40],
+    [400, 50],
+    [Infinity, 55],
   ],
 };
 
@@ -450,7 +458,7 @@ export function estimateLeg(
     walking: `At a steady ${kmh} km/h walking pace.`,
     cycling: `At ${kmh} km/h on a bike, without long stops.`,
     driving: `At ~${kmh} km/h average for this distance, before traffic and breaks.`,
-    train: `At ~${kmh} km/h average for this distance, including stops. Actual services vary.`,
+    train: `At ~${kmh} km/h average, i.e. a conventional service with stops. A high-speed line would be much faster, an older one slower.`,
     bus: `At ~${kmh} km/h average for this distance, including stops.`,
   };
   return {
