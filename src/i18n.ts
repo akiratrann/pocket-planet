@@ -183,10 +183,9 @@ const en: Dict = {
   band_worth: 'Worth it',
   band_minor: 'Minor',
   // Ranking transparency ("why is this #3?").
-  why_rank: 'Why',
+  why_rank_q: 'Why #{rank} of {total} in {category}?',
+  why_rank_q_bare: 'Why #{rank} in {category}?',
   why_rank_short: 'Why?',
-  of: 'of',
-  in: 'in',
   score_basis:
     'The score is relative: the highest-scoring place in this guide sets 100, and everything else is scaled against it.',
   rank_scope: 'The # is this place’s position within its own category.',
@@ -200,8 +199,8 @@ const en: Dict = {
   // claim and the only one the data supports.
   ranked_by_body:
     'Pocket Planet, from the sources below. Every listing is scored on how fully travel sources document it, then lifted when those sources name it repeatedly. See the Learn tab for the full method.',
-  corrections_applied: 'traveller corrections applied to',
-  model_version: 'ranking model v',
+  corrections_applied: '{n} traveller corrections applied to {place}',
+  model_version: 'ranking model v{v}',
   sources_used: 'Sources for this guide',
   base_guide: 'base guide',
   show_all_sources: 'Show all sources',
@@ -304,6 +303,8 @@ const en: Dict = {
   sig_feedback: 'Corrections from signed-in travellers',
   sig_civic: 'Its name says it is a civic or utility building (school, post office…)',
   sig_upto: 'up to',
+  why_rank: 'Why',
+  why_rank_q_rankonly: 'Why #{rank}?',
 };
 
 const es: Dict = {
@@ -373,6 +374,27 @@ const es: Dict = {
   for_you_note:
     'Las puntuaciones y los puestos son iguales para todos. Tu cuenta solo cambia qué lugares se destacan aquí.',
   saved_here: 'ya guardados de esta guía',
+
+  // Ranking transparency ("why is this #3?").
+  why_rank_q: '¿Por qué el n.º {rank} de {total} en {category}?',
+  why_rank_q_bare: '¿Por qué el n.º {rank} en {category}?',
+  why_rank_short: '¿Por qué?',
+  score_basis: 'La puntuación es relativa: el lugar con la puntuación más alta de esta guía marca 100 y todo lo demás se escala respecto a él.',
+  rank_scope: 'El n.º es la posición de este lugar dentro de su propia categoría.',
+  what_lifted_it: 'Qué lo impulsó',
+  no_signals: 'No se encontró ninguna señal destacada al puntuarlo. Se clasifica según el detalle que contiene su ficha y el lugar que ocupa en la guía de origen, nada más.',
+  ranked_by: 'Clasificado por',
+  ranked_by_body: 'Pocket Planet, a partir de las fuentes de abajo. Cada ficha se puntúa según lo completa que sea su documentación en las fuentes de viajes, y sube cuando esas fuentes la nombran repetidamente. Consulta la pestaña Aprender para ver el método completo.',
+  corrections_applied: '{n} correcciones de viajeros aplicadas a {place}',
+  model_version: 'modelo de clasificación v{v}',
+  sources_used: 'Fuentes de esta guía',
+  base_guide: 'guía base',
+  show_all_sources: 'Mostrar todas las fuentes',
+  source_read: 'leído',
+  no_extra_sources: 'De momento solo la guía base. Todavía no se han incorporado debates de viajes ni artículos editoriales sobre este lugar.',
+  photo_none: 'Aún sin foto',
+  why_rank: 'Por qué',
+  why_rank_q_rankonly: '¿Por qué el n.º {rank}?',
 };
 
 const fr: Dict = {
@@ -442,6 +464,27 @@ const fr: Dict = {
   for_you_note:
     'Les scores et les classements sont les mêmes pour tout le monde. Votre compte change seulement les lieux mis en avant ici.',
   saved_here: 'déjà enregistrés dans ce guide',
+
+  // Ranking transparency ("why is this #3?").
+  why_rank_q: 'Pourquoi le n° {rank} sur {total} dans {category} ?',
+  why_rank_q_bare: 'Pourquoi le n° {rank} dans {category} ?',
+  why_rank_short: 'Pourquoi ?',
+  score_basis: 'Le score est relatif : le lieu le mieux noté de ce guide fixe 100, et tout le reste est mis à l’échelle par rapport à lui.',
+  rank_scope: 'Le n° correspond à la position de ce lieu au sein de sa propre catégorie.',
+  what_lifted_it: 'Ce qui l’a fait monter',
+  no_signals: 'Aucun signal marquant n’a été trouvé lors du calcul. Son classement repose uniquement sur le niveau de détail de sa fiche et sur sa place dans le guide source.',
+  ranked_by: 'Classé par',
+  ranked_by_body: 'Pocket Planet, à partir des sources ci-dessous. Chaque fiche est notée selon l’exhaustivité avec laquelle les sources de voyage la documentent, puis remonte lorsque ces sources la nomment à plusieurs reprises. Voir l’onglet Apprendre pour la méthode complète.',
+  corrections_applied: '{n} corrections de voyageurs appliquées à {place}',
+  model_version: 'modèle de classement v{v}',
+  sources_used: 'Sources de ce guide',
+  base_guide: 'guide de base',
+  show_all_sources: 'Afficher toutes les sources',
+  source_read: 'lu',
+  no_extra_sources: 'Pour l’instant, seulement le guide de base. Les discussions de voyage et les articles éditoriaux sur ce lieu n’ont pas encore été intégrés.',
+  photo_none: 'Pas encore de photo',
+  why_rank: 'Pourquoi',
+  why_rank_q_rankonly: 'Pourquoi le n° {rank} ?',
 };
 
 const de: Dict = {
@@ -511,6 +554,27 @@ const de: Dict = {
   for_you_note:
     'Wertungen und Platzierungen sind für alle gleich. Dein Konto ändert nur, welche Orte hier hervorgehoben werden.',
   saved_here: 'bereits aus diesem Reiseführer gespeichert',
+
+  // Ranking transparency ("why is this #3?").
+  why_rank_q: 'Warum Nr. {rank} von {total} in {category}?',
+  why_rank_q_bare: 'Warum Nr. {rank} in {category}?',
+  why_rank_short: 'Warum?',
+  score_basis: 'Der Wert ist relativ: Der bestbewertete Ort in diesem Reiseführer setzt 100, alles andere wird daran skaliert.',
+  rank_scope: 'Die Nr. ist die Position dieses Ortes innerhalb seiner eigenen Kategorie.',
+  what_lifted_it: 'Was ihn nach oben gebracht hat',
+  no_signals: 'Bei der Bewertung wurde kein herausragendes Signal gefunden. Die Platzierung ergibt sich allein daraus, wie ausführlich der Eintrag ist und wo er im Quellenführer steht.',
+  ranked_by: 'Eingestuft von',
+  ranked_by_body: 'Pocket Planet, auf Basis der unten genannten Quellen. Jeder Eintrag wird danach bewertet, wie vollständig Reisequellen ihn dokumentieren, und steigt, wenn diese Quellen ihn wiederholt namentlich nennen. Die vollständige Methode steht im Tab „Lernen“.',
+  corrections_applied: '{n} Korrekturen von Reisenden angewendet auf {place}',
+  model_version: 'Ranking-Modell v{v}',
+  sources_used: 'Quellen für diesen Reiseführer',
+  base_guide: 'Basisführer',
+  show_all_sources: 'Alle Quellen anzeigen',
+  source_read: 'gelesen',
+  no_extra_sources: 'Bisher nur der Basisführer. Reisediskussionen und redaktionelle Artikel zu diesem Ort wurden noch nicht eingelesen.',
+  photo_none: 'Noch kein Foto',
+  why_rank: 'Warum',
+  why_rank_q_rankonly: 'Warum Nr. {rank}?',
 };
 
 const it: Dict = {
@@ -580,6 +644,27 @@ const it: Dict = {
   for_you_note:
     'Punteggi e posizioni sono uguali per tutti. Il tuo account cambia solo quali luoghi vengono messi in evidenza qui.',
   saved_here: 'già salvati da questa guida',
+
+  // Ranking transparency ("why is this #3?").
+  why_rank_q: 'Perché il n. {rank} su {total} in {category}?',
+  why_rank_q_bare: 'Perché il n. {rank} in {category}?',
+  why_rank_short: 'Perché?',
+  score_basis: 'Il punteggio è relativo: il luogo con il punteggio più alto di questa guida fissa 100 e tutto il resto viene scalato rispetto a esso.',
+  rank_scope: 'Il n. è la posizione di questo luogo all’interno della sua categoria.',
+  what_lifted_it: 'Che cosa l’ha fatto salire',
+  no_signals: 'Non è stato trovato alcun segnale rilevante al momento del calcolo. La posizione dipende solo da quanti dettagli contiene la scheda e da dove compare nella guida di origine.',
+  ranked_by: 'Classificato da',
+  ranked_by_body: 'Pocket Planet, a partire dalle fonti qui sotto. Ogni scheda è valutata in base a quanto completamente le fonti di viaggio la documentano, e sale quando quelle fonti la nominano ripetutamente. Vedi la scheda Impara per il metodo completo.',
+  corrections_applied: '{n} correzioni dei viaggiatori applicate a {place}',
+  model_version: 'modello di classificazione v{v}',
+  sources_used: 'Fonti di questa guida',
+  base_guide: 'guida di base',
+  show_all_sources: 'Mostra tutte le fonti',
+  source_read: 'letto',
+  no_extra_sources: 'Per ora solo la guida di base. Discussioni di viaggio e articoli editoriali su questo luogo non sono ancora stati acquisiti.',
+  photo_none: 'Ancora nessuna foto',
+  why_rank: 'Perché',
+  why_rank_q_rankonly: 'Perché il n. {rank}?',
 };
 
 const pt: Dict = {
@@ -649,6 +734,27 @@ const pt: Dict = {
   for_you_note:
     'As pontuações e as posições são iguais para todos. Sua conta só muda quais lugares aparecem em destaque aqui.',
   saved_here: 'já salvos deste guia',
+
+  // Ranking transparency ("why is this #3?").
+  why_rank_q: 'Porquê o n.º {rank} de {total} em {category}?',
+  why_rank_q_bare: 'Porquê o n.º {rank} em {category}?',
+  why_rank_short: 'Porquê?',
+  score_basis: 'A pontuação é relativa: o lugar com a pontuação mais alta deste guia define 100 e tudo o resto é escalado em relação a ele.',
+  rank_scope: 'O n.º é a posição deste lugar dentro da sua própria categoria.',
+  what_lifted_it: 'O que o fez subir',
+  no_signals: 'Não foi encontrado nenhum sinal em destaque ao calcular a pontuação. A posição depende apenas do detalhe que a ficha contém e de onde aparece no guia de origem.',
+  ranked_by: 'Classificado por',
+  ranked_by_body: 'Pocket Planet, a partir das fontes abaixo. Cada ficha é pontuada consoante a profundidade com que as fontes de viagem a documentam e sobe quando essas fontes a nomeiam repetidamente. Veja o separador Aprender para o método completo.',
+  corrections_applied: '{n} correções de viajantes aplicadas a {place}',
+  model_version: 'modelo de classificação v{v}',
+  sources_used: 'Fontes deste guia',
+  base_guide: 'guia base',
+  show_all_sources: 'Mostrar todas as fontes',
+  source_read: 'lido',
+  no_extra_sources: 'Por agora, apenas o guia base. Discussões de viagem e artigos editoriais sobre este lugar ainda não foram integrados.',
+  photo_none: 'Ainda sem foto',
+  why_rank: 'Porquê',
+  why_rank_q_rankonly: 'Porquê o n.º {rank}?',
 };
 
 const vi: Dict = {
@@ -754,6 +860,27 @@ const vi: Dict = {
   for_you_note:
     'Điểm số và thứ hạng giống nhau với mọi người. Tài khoản của bạn chỉ thay đổi những địa điểm được nêu bật ở đây.',
   saved_here: 'đã lưu từ hướng dẫn này',
+
+  // Ranking transparency ("why is this #3?").
+  why_rank_q: 'Vì sao xếp hạng {rank} trên {total} trong {category}?',
+  why_rank_q_bare: 'Vì sao xếp hạng {rank} trong {category}?',
+  why_rank_short: 'Vì sao?',
+  score_basis: 'Điểm số mang tính tương đối: địa điểm có điểm cao nhất trong hướng dẫn này được đặt là 100, mọi địa điểm khác được quy đổi theo đó.',
+  rank_scope: 'Số thứ hạng là vị trí của địa điểm này trong chính danh mục của nó.',
+  what_lifted_it: 'Điều giúp nó tăng hạng',
+  no_signals: 'Không tìm thấy tín hiệu nổi bật nào khi chấm điểm. Thứ hạng chỉ dựa trên mức độ chi tiết của mục này và vị trí của nó trong hướng dẫn gốc.',
+  ranked_by: 'Xếp hạng bởi',
+  ranked_by_body: 'Pocket Planet, dựa trên các nguồn bên dưới. Mỗi mục được chấm điểm theo mức độ đầy đủ mà các nguồn du lịch ghi chép về nó, rồi được nâng lên khi các nguồn đó nhắc đến tên nó nhiều lần. Xem tab Tìm hiểu để biết phương pháp đầy đủ.',
+  corrections_applied: '{n} chỉnh sửa từ du khách được áp dụng cho {place}',
+  model_version: 'mô hình xếp hạng v{v}',
+  sources_used: 'Nguồn cho hướng dẫn này',
+  base_guide: 'hướng dẫn cơ sở',
+  show_all_sources: 'Hiện tất cả nguồn',
+  source_read: 'đã đọc',
+  no_extra_sources: 'Hiện mới chỉ có hướng dẫn cơ sở. Các thảo luận du lịch và bài viết biên tập về địa điểm này chưa được đọc vào.',
+  photo_none: 'Chưa có ảnh',
+  why_rank: 'Vì sao',
+  why_rank_q_rankonly: 'Vì sao hạng {rank}?',
 };
 
 const ja: Dict = {
@@ -823,6 +950,27 @@ const ja: Dict = {
   for_you_note:
     'スコアと順位は全員に共通です。アカウントによって変わるのは、ここで取り上げる場所だけです。',
   saved_here: 'このガイドから保存済み',
+
+  // Ranking transparency ("why is this #3?").
+  why_rank_q: '{category}の{total}件中{rank}位なのはなぜ？',
+  why_rank_q_bare: '{category}で{rank}位なのはなぜ？',
+  why_rank_short: 'なぜ？',
+  score_basis: 'スコアは相対的なものです。このガイドで最も高いスコアの場所を100とし、他はそれを基準に換算しています。',
+  rank_scope: '番号は、この場所が属するカテゴリ内での順位です。',
+  what_lifted_it: '順位を押し上げた要素',
+  no_signals: 'スコア算出時に際立った要素は見つかりませんでした。掲載情報の詳しさと、出典ガイド内での掲載位置のみに基づく順位です。',
+  ranked_by: '順位付けの主体',
+  ranked_by_body: '以下の出典に基づく Pocket Planet による順位です。各項目は旅行情報源がどれだけ詳しく記載しているかで採点し、それらの情報源が繰り返し名前を挙げている場合に順位が上がります。詳しい方法は「学ぶ」タブをご覧ください。',
+  corrections_applied: '{place}に適用された旅行者による修正{n}件',
+  model_version: 'ランキングモデル v{v}',
+  sources_used: 'このガイドの出典',
+  base_guide: '基本ガイド',
+  show_all_sources: 'すべての出典を表示',
+  source_read: '読み込み',
+  no_extra_sources: '現時点では基本ガイドのみです。この場所に関する旅行者の議論や編集記事はまだ読み込まれていません。',
+  photo_none: '写真はまだありません',
+  why_rank: 'なぜ',
+  why_rank_q_rankonly: '{rank}位なのはなぜ？',
 };
 
 const ko: Dict = {
@@ -892,6 +1040,27 @@ const ko: Dict = {
   for_you_note:
     '점수와 순위는 모두에게 동일합니다. 계정에 따라 달라지는 것은 여기에서 골라 보여 주는 장소뿐입니다.',
   saved_here: '이 가이드에서 이미 저장함',
+
+  // Ranking transparency ("why is this #3?").
+  why_rank_q: '{category} {total}곳 중 {rank}위인 이유는?',
+  why_rank_q_bare: '{category}에서 {rank}위인 이유는?',
+  why_rank_short: '왜?',
+  score_basis: '점수는 상대적입니다. 이 가이드에서 가장 높은 점수의 장소를 100으로 두고 나머지는 그에 맞춰 환산합니다.',
+  rank_scope: '번호는 이 장소가 속한 카테고리 안에서의 순위입니다.',
+  what_lifted_it: '순위를 끌어올린 요소',
+  no_signals: '점수를 매길 때 두드러진 신호가 없었습니다. 항목에 담긴 정보의 상세함과 원본 가이드에서의 위치만으로 정해진 순위입니다.',
+  ranked_by: '순위 산정 주체',
+  ranked_by_body: '아래 출처를 바탕으로 한 Pocket Planet의 순위입니다. 각 항목은 여행 관련 출처가 얼마나 자세히 기록했는지로 채점되며, 그 출처들이 이름을 반복해서 언급할수록 순위가 올라갑니다. 자세한 방법은 ‘배우기’ 탭을 참고하세요.',
+  corrections_applied: '{place}에 적용된 여행자 수정 {n}건',
+  model_version: '랭킹 모델 v{v}',
+  sources_used: '이 가이드의 출처',
+  base_guide: '기본 가이드',
+  show_all_sources: '모든 출처 보기',
+  source_read: '읽음',
+  no_extra_sources: '현재는 기본 가이드뿐입니다. 이 장소에 대한 여행 토론과 편집 기사는 아직 반영되지 않았습니다.',
+  photo_none: '아직 사진 없음',
+  why_rank: '왜',
+  why_rank_q_rankonly: '{rank}위인 이유는?',
 };
 
 const zh: Dict = {
@@ -958,6 +1127,27 @@ const zh: Dict = {
   for_you_basis: '依据你账号中收藏的地点',
   for_you_note: '分数和排名对所有人都相同。你的账号只会改变这里挑出哪些地点。',
   saved_here: '已从本指南收藏',
+
+  // Ranking transparency ("why is this #3?").
+  why_rank_q: '为什么在{category}的{total}个地点中排第{rank}？',
+  why_rank_q_bare: '为什么在{category}中排第{rank}？',
+  why_rank_short: '为什么？',
+  score_basis: '评分是相对的：本指南中评分最高的地点定为100，其余按此换算。',
+  rank_scope: '编号是该地点在所属类别中的排名。',
+  what_lifted_it: '提升排名的因素',
+  no_signals: '评分时未发现突出信号。该排名仅取决于条目信息的详尽程度，以及它在原始指南中出现的位置。',
+  ranked_by: '排名来源',
+  ranked_by_body: '由 Pocket Planet 依据以下来源排名。每个条目按旅行资料记录得有多完整来评分，当这些来源反复提到它的名字时排名会上升。完整方法请见“学习”标签页。',
+  corrections_applied: '已对{place}应用{n}条旅行者更正',
+  model_version: '排名模型 v{v}',
+  sources_used: '本指南的来源',
+  base_guide: '基础指南',
+  show_all_sources: '显示全部来源',
+  source_read: '已读取',
+  no_extra_sources: '目前仅有基础指南。关于此地的旅行讨论和编辑文章尚未读入。',
+  photo_none: '暂无照片',
+  why_rank: '为什么',
+  why_rank_q_rankonly: '为什么排第{rank}？',
 };
 
 const ru: Dict = {
@@ -1027,6 +1217,27 @@ const ru: Dict = {
   for_you_note:
     'Оценки и позиции одинаковы для всех. Аккаунт меняет только то, какие места выделены здесь.',
   saved_here: 'уже сохранено из этого путеводителя',
+
+  // Ranking transparency ("why is this #3?").
+  why_rank_q: 'Почему № {rank} из {total} в категории «{category}»?',
+  why_rank_q_bare: 'Почему № {rank} в категории «{category}»?',
+  why_rank_short: 'Почему?',
+  score_basis: 'Оценка относительная: место с наивысшей оценкой в этом путеводителе принимается за 100, остальные пересчитываются относительно него.',
+  rank_scope: 'Номер — это позиция места внутри его собственной категории.',
+  what_lifted_it: 'Что подняло его выше',
+  no_signals: 'При подсчёте не найдено ни одного заметного сигнала. Позиция определяется только тем, насколько подробна карточка и где место упоминается в исходном путеводителе.',
+  ranked_by: 'Ранжирование',
+  ranked_by_body: 'Pocket Planet, на основе источников ниже. Каждая карточка оценивается по тому, насколько полно её описывают источники о путешествиях, и поднимается, когда эти источники называют её по имени неоднократно. Полный метод — во вкладке «Обучение».',
+  corrections_applied: 'Правок путешественников применено к {place}: {n}',
+  model_version: 'модель ранжирования v{v}',
+  sources_used: 'Источники этого путеводителя',
+  base_guide: 'базовый путеводитель',
+  show_all_sources: 'Показать все источники',
+  source_read: 'прочитано',
+  no_extra_sources: 'Пока только базовый путеводитель. Обсуждения поездок и редакционные статьи об этом месте ещё не загружены.',
+  photo_none: 'Фото пока нет',
+  why_rank: 'Почему',
+  why_rank_q_rankonly: 'Почему № {rank}?',
 };
 
 const ar: Dict = {
@@ -1096,12 +1307,46 @@ const ar: Dict = {
   for_you_note:
     'الدرجات والترتيب متطابقة للجميع. حسابك يغيّر فقط الأماكن التي تُبرز هنا.',
   saved_here: 'محفوظة بالفعل من هذا الدليل',
+
+  // Ranking transparency ("why is this #3?").
+  why_rank_q: 'لماذا المرتبة {rank} من أصل {total} في {category}؟',
+  why_rank_q_bare: 'لماذا المرتبة {rank} في {category}؟',
+  why_rank_short: 'لماذا؟',
+  score_basis: 'التقييم نسبي: المكان الأعلى تقييمًا في هذا الدليل يُحدَّد بـ100، ويُقاس كل ما عداه بالنسبة إليه.',
+  rank_scope: 'الرقم هو ترتيب هذا المكان داخل فئته نفسها.',
+  what_lifted_it: 'ما الذي رفع ترتيبه',
+  no_signals: 'لم يُعثر على أي إشارة بارزة عند احتساب التقييم. يعتمد ترتيبه فقط على مقدار التفاصيل في بطاقته وموضعه في الدليل المصدر.',
+  ranked_by: 'جهة الترتيب',
+  ranked_by_body: 'Pocket Planet، استنادًا إلى المصادر أدناه. تُقيَّم كل بطاقة بحسب مدى اكتمال توثيق مصادر السفر لها، ثم يرتفع ترتيبها عندما تذكرها تلك المصادر بالاسم مرارًا. راجع تبويب «تعلّم» للاطلاع على المنهجية كاملة.',
+  corrections_applied: '{n} تصحيحات من المسافرين مطبَّقة على {place}',
+  model_version: 'نموذج الترتيب v{v}',
+  sources_used: 'مصادر هذا الدليل',
+  base_guide: 'الدليل الأساسي',
+  show_all_sources: 'عرض كل المصادر',
+  source_read: 'تمت القراءة',
+  no_extra_sources: 'حتى الآن الدليل الأساسي فقط. لم تُقرأ بعد نقاشات السفر والمقالات التحريرية عن هذا المكان.',
+  photo_none: 'لا توجد صورة بعد',
+  why_rank: 'لماذا',
+  why_rank_q_rankonly: 'لماذا المرتبة {rank}؟',
 };
 
 const TRANSLATIONS: Record<string, Dict> = { en, es, fr, de, it, pt, vi, ja, ko, zh, ru, ar };
 
-export function translate(lang: string, key: string): string {
-  return TRANSLATIONS[lang]?.[key] ?? en[key] ?? key;
+/**
+ * Look up `key`, filling `{placeholders}` from `vars`.
+ *
+ * Placeholders rather than JSX fragments because the pieces of a sentence do not
+ * survive translation: "Why #4 of 98 in Museums" put the rank first, the total
+ * second and the category last, which is simply not the order Japanese, Korean
+ * or Arabic build that sentence in. A whole-sentence template lets each language
+ * put the parts where they belong.
+ */
+export function translate(lang: string, key: string, vars?: Record<string, string | number>): string {
+  const raw = TRANSLATIONS[lang]?.[key] ?? en[key] ?? key;
+  if (!vars) return raw;
+  return raw.replace(/\{(\w+)\}/g, (m, name: string) =>
+    Object.prototype.hasOwnProperty.call(vars, name) ? String(vars[name]) : m,
+  );
 }
 
 export function dirFor(lang: string): 'ltr' | 'rtl' {
@@ -1111,6 +1356,9 @@ export function dirFor(lang: string): 'ltr' | 'rtl' {
 /** Hook: returns a translator bound to the current language, plus the code/dir. */
 export function useI18n() {
   const lang = useAppStore((s) => s.language);
-  const t = useMemo(() => (key: string) => translate(lang, key), [lang]);
+  const t = useMemo(
+    () => (key: string, vars?: Record<string, string | number>) => translate(lang, key, vars),
+    [lang],
+  );
   return { t, lang, dir: dirFor(lang) };
 }

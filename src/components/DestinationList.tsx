@@ -96,7 +96,7 @@ function DestinationCard({
             aria-expanded={showWhy}
             // The bare number is the most misreadable thing on the card, so the
             // hover text names the band, then names the score's author.
-            title={`${d.score}/100 — ${t('band_' + band)}. ${BADGE_TIP}. ${t('why_rank')} #${d.rank}?`}
+            title={`${d.score}/100 — ${t('band_' + band)}. ${BADGE_TIP}. ${t('why_rank_q_rankonly', { rank: d.rank })}`}
           >
             <span className="scorebadge__num">
               {d.score}

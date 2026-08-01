@@ -264,9 +264,14 @@ export function RankProvenance({ d, location }: { d: Destination; location: stri
   return (
     <div className="prov">
       <div className="prov__head">
+        {/* One template per case rather than "Why" + "of" + "in" glued together:
+            the pieces do not survive translation. Japanese builds this sentence
+            category-first and puts the rank last, and Arabic reads the other way
+            entirely, so only a whole sentence can be ordered correctly. */}
         <span className="prov__title">
-          {t('why_rank')} #{d.rank}
-          {inCategory > 0 ? ` ${t('of')} ${inCategory}` : ''} {t('in')} {t('cat_' + d.category)}?
+          {inCategory > 0
+            ? t('why_rank_q', { rank: d.rank, total: inCategory, category: t('cat_' + d.category) })
+            : t('why_rank_q_bare', { rank: d.rank, category: t('cat_' + d.category) })}
         </span>
         <span className="prov__score">{d.score}/100</span>
       </div>
@@ -333,11 +338,11 @@ export function RankProvenance({ d, location }: { d: Destination; location: stri
           <p className="prov__learned">
             {meta.feedbackApplied > 0 && (
               <>
-                {meta.feedbackApplied} {t('corrections_applied')} {location}
+                {t('corrections_applied', { n: meta.feedbackApplied, place: location })}
                 {meta.learnedVersion > 0 ? ' · ' : ''}
               </>
             )}
-            {meta.learnedVersion > 0 && `${t('model_version')}${meta.learnedVersion}`}
+            {meta.learnedVersion > 0 && t('model_version', { v: meta.learnedVersion })}
           </p>
         )}
       </div>
