@@ -9,8 +9,9 @@ import {
 import type { ExpressionSpecification } from 'maplibre-gl';
 import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import type { Destination, Guide } from '../types';
+import type { QuerySource } from '../store/useAppStore';
 import { CATEGORY_MAP } from '../data/categories';
-import { reverseGeocode } from '../data/geocode';
+import { reverseGeocode, scopeForSpanKm, isSamePlace, type MapScope } from '../data/geocode';
 import { translate } from '../i18n';
 
 // maplibre derives its worker URL from `new URL(`./${name}`, import.meta.url)`.
@@ -84,6 +85,17 @@ function forceEnglishLabels(map: MaplibreMap) {
   }
 }
 
+/**
+ * What the current viewport says the user is looking at, when that disagrees
+ * with the guide on screen.
+ *
+ * `offer` — a concrete place at the viewport's scope, waiting for one click.
+ * `too-far` — a continental/global view, which no single guide answers.
+ */
+export type ScopeHint =
+  | { kind: 'offer'; name: string; scope: MapScope }
+  | { kind: 'too-far' };
+
 interface Props {
   guide?: Guide;
   destinations: Destination[];
@@ -94,6 +106,10 @@ interface Props {
   autoExplore: boolean;
   onExplore: (placeName: string) => void;
   onExploringChange: (label: string | null) => void;
+  /** Who chose the loaded guide — decides re-scope vs. merely offer to. */
+  querySource: QuerySource;
+  /** Raised when the viewport's scope stops matching the guide. Null clears it. */
+  onScopeHint: (hint: ScopeHint | null) => void;
   /** True when no category filter is active — keep the map uncluttered. */
   allCategories: boolean;
   /** Whether to frame the camera to a newly loaded guide (searches yes, zoom-explore no). */
@@ -112,6 +128,30 @@ interface Props {
 
 /** With no category filter, show just the top highlights so the map isn't cramped. */
 const OVERVIEW_CAP = 10;
+
+/**
+ * How long the map must sit still before its scope is re-read.
+ *
+ * Long on purpose. Every re-scope can cost a guide build (25-70s cold on a place
+ * nobody has asked for yet), so the trigger has to be "the user stopped and
+ * looked", not "the wheel turned". A continuous wheel-zoom fires `moveend`
+ * repeatedly and every one of those restarts this timer, so an eight-step zoom
+ * out from a city to a country is ONE lookup, at the end.
+ */
+const RESCOPE_DEBOUNCE_MS = 1100;
+
+/** Mean km per degree of latitude — good to ~0.3% anywhere, which is plenty here. */
+const KM_PER_DEG = 111.32;
+
+/** The widest the viewport reaches on the ground, in km. */
+function viewportSpanKm(map: MaplibreMap): number {
+  const b = map.getBounds();
+  const latSpan = Math.min(Math.abs(b.getNorth() - b.getSouth()), 180);
+  // Zoomed far enough out the world repeats and `east - west` runs past 360.
+  const lonSpan = Math.min(Math.abs(b.getEast() - b.getWest()), 360);
+  const midLat = ((b.getNorth() + b.getSouth()) / 2) * (Math.PI / 180);
+  return Math.max(latSpan * KM_PER_DEG, lonSpan * KM_PER_DEG * Math.cos(midLat));
+}
 
 /** How many pins to show at a given zoom — few when zoomed out, all up close. */
 function capForZoom(zoom: number): number {
@@ -160,6 +200,8 @@ export default function MapView({
   autoExplore,
   onExplore,
   onExploringChange,
+  querySource,
+  onScopeHint,
   allCategories,
   frameOnLoad,
   lang,
@@ -181,7 +223,10 @@ export default function MapView({
   const onExploringChangeRef = useRef(onExploringChange);
   const allCategoriesRef = useRef(allCategories);
   const langRef = useRef(lang);
-  const lastExploredRef = useRef<string>('');
+  const querySourceRef = useRef(querySource);
+  const onScopeHintRef = useRef(onScopeHint);
+  /** `scope:place` of the last re-scope decision, so each one is made once. */
+  const lastScopeKeyRef = useRef<string>('');
   const suppressUntilRef = useRef<number>(0);
   const exploreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const frameOnLoadRef = useRef(frameOnLoad);
@@ -200,6 +245,8 @@ export default function MapView({
   onExploringChangeRef.current = onExploringChange;
   allCategoriesRef.current = allCategories;
   langRef.current = lang;
+  querySourceRef.current = querySource;
+  onScopeHintRef.current = onScopeHint;
 
   /** Render only the pins that belong in the current viewport + zoom budget. */
   const renderMarkers = () => {
@@ -260,57 +307,100 @@ export default function MapView({
     }
   };
 
-  /** When you zoom out well past the current guide's area, climb to its parent region. */
-  const maybeDrillUp = (): boolean => {
-    const map = mapRef.current;
-    const guide = guideRef.current;
-    if (!map || !autoExploreRef.current) return false;
-    if (Date.now() < suppressUntilRef.current) return false;
-    if (!guide?.parent || !guide.bbox) return false;
-
-    const b = map.getBounds();
-    const viewLat = b.getNorth() - b.getSouth();
-    const viewLon = b.getEast() - b.getWest();
-    const gLat = Math.max(guide.bbox[3] - guide.bbox[1], 0.05);
-    const gLon = Math.max(guide.bbox[2] - guide.bbox[0], 0.05);
-
-    // The viewport now dwarfs the current region → surface the bigger picture.
-    if (viewLat < gLat * 2.2 || viewLon < gLon * 2.2) return false;
-
-    const key = guide.parent.trim().toLowerCase();
-    if (key === lastExploredRef.current) return false;
-    lastExploredRef.current = key;
-    onExploringChangeRef.current?.(guide.parent);
-    onExploreRef.current?.(guide.parent);
-    return true;
-  };
-
-  /** When you roam to an empty area, discover what place is there and load it. */
-  const maybeAutoExplore = () => {
+  /**
+   * Read what the settled viewport is asking about, and act on it.
+   *
+   * The old version asked two narrower questions — "is the viewport much bigger
+   * than the guide's bbox? then load the guide's Wikivoyage PARENT" and "is the
+   * viewport empty of pins? then load whatever is at the centre" — and zooming
+   * out from Kyoto to the whole of Japan answered neither. Kyoto's pins were
+   * still on screen, so the second never ran, and the first climbed a
+   * Wikivoyage breadcrumb (Kyoto → Kansai) rather than to the level the user was
+   * actually looking at. The panel just kept saying "Kyoto (prefecture)".
+   *
+   * So the question is now the one the user is really asking: at THIS span, what
+   * place am I looking at? A city-sized view means the city, a prefecture-sized
+   * view the prefecture, a country-sized view the country.
+   */
+  const runRescope = async () => {
     const map = mapRef.current;
     if (!map || !autoExploreRef.current) return;
+    // Never re-scope out from under a gesture: inertia, an easing flyTo and a
+    // trackpad pinch all keep firing `moveend` while the user is still moving.
+    // Re-arm instead, so the lookup happens once they have actually stopped.
+    if (map.isMoving() || map.isZooming() || map.isRotating()) {
+      scheduleRescope();
+      return;
+    }
     if (Date.now() < suppressUntilRef.current) return;
-    const zoom = map.getZoom();
-    if (zoom < 4) return;
 
-    // If we already have pins in view, we're looking at loaded data — don't reload.
+    const scope = scopeForSpanKm(viewportSpanKm(map));
+    // Continental / whole-world. There is no guide for "Asia", and picking the
+    // country under the centre of a hemisphere would be a coin toss that costs a
+    // 25-70s build, so the map says what it needs and does nothing.
+    if (scope === 'world') {
+      onScopeHintRef.current?.({ kind: 'too-far' });
+      return;
+    }
+
+    const guide = guideRef.current;
     const bounds = map.getBounds();
-    const hasInView = destRef.current.some(
+    const hasPinsInView = destRef.current.some(
       (d) => d.lat != null && d.lon != null && bounds.contains([d.lon!, d.lat!]),
     );
-    if (hasInView) return;
+    const guideCenterInView = !!guide && bounds.contains(guide.center);
 
-    if (exploreTimerRef.current) clearTimeout(exploreTimerRef.current);
-    exploreTimerRef.current = setTimeout(async () => {
-      const c = map.getCenter();
-      const place = await reverseGeocode(c.lat, c.lng, map.getZoom(), langRef.current);
-      if (!place) return;
-      const key = place.name.trim().toLowerCase();
-      if (key === lastExploredRef.current || key === guideRef.current?.title.toLowerCase()) return;
-      lastExploredRef.current = key;
+    // Anchor the lookup on the guide when it is still on screen: zooming out
+    // from Kyoto is a wider view OF KYOTO, so the country wanted is Kyoto's, not
+    // whatever happens to sit under the middle of the window — which at this
+    // span could easily be the Sea of Japan or South Korea. Only once the guide
+    // has left the screen entirely is the viewport centre the better question.
+    const centre = map.getCenter();
+    const anchor =
+      guide && guideCenterInView
+        ? { lat: guide.center[1], lon: guide.center[0] }
+        : { lat: centre.lat, lon: centre.lng };
+
+    const place = await reverseGeocode(anchor.lat, anchor.lon, scope, langRef.current);
+    // The map can be torn down across that await.
+    if (!place || mapRef.current !== map || !autoExploreRef.current) return;
+
+    // The viewport already agrees with the guide. Clear the memo as well as the
+    // hint: coming back to a matching view is what earns a dismissed offer the
+    // right to be made again later.
+    if (guide && isSamePlace(place.name, guide.title)) {
+      lastScopeKeyRef.current = '';
+      onScopeHintRef.current?.(null);
+      return;
+    }
+
+    // One decision per (scope, place). This is what makes a dismissal stick, and
+    // what stops an answer we cannot match to a Wikivoyage title from being
+    // re-offered forever.
+    const key = `${place.scope}:${place.name.trim().toLowerCase()}`;
+    if (key === lastScopeKeyRef.current) return;
+    lastScopeKeyRef.current = key;
+
+    // Roamed clean off the guide → nothing of the user's is on screen to
+    // clobber, so load the new place, which is what "explore as I move" has
+    // always done. Otherwise the app may only re-choose a guide it chose itself;
+    // a destination the user typed is replaced on their click, never on a zoom.
+    const roamedAway = !hasPinsInView && !guideCenterInView;
+    if (roamedAway || querySourceRef.current === 'map') {
+      onScopeHintRef.current?.(null);
       onExploringChangeRef.current?.(place.name);
       onExploreRef.current?.(place.name);
-    }, 650);
+    } else {
+      onScopeHintRef.current?.({ kind: 'offer', name: place.name, scope: place.scope });
+    }
+  };
+
+  const scheduleRescope = () => {
+    if (!mapRef.current || !autoExploreRef.current) return;
+    if (exploreTimerRef.current) clearTimeout(exploreTimerRef.current);
+    exploreTimerRef.current = setTimeout(() => {
+      void runRescope();
+    }, RESCOPE_DEBOUNCE_MS);
   };
 
   // Initialize the map once.
@@ -360,13 +450,14 @@ export default function MapView({
     });
     map.on('moveend', () => {
       renderMarkers();
-      // Google-Maps style: as you zoom/pan, guess the region under the view and
-      // surface its places. These loads NEVER move the camera (see the guide
+      // Google-Maps style: as you zoom/pan, work out what the view is asking
+      // about and surface it. These loads NEVER move the camera (see the guide
       // effect) — zooming in/out just fills in the region, it doesn't drag you.
-      if (!maybeDrillUp()) maybeAutoExplore();
+      scheduleRescope();
     });
     mapRef.current = map;
     return () => {
+      if (exploreTimerRef.current) clearTimeout(exploreTimerRef.current);
       map.remove();
       mapRef.current = null;
       loadedRef.current = false;
@@ -378,8 +469,12 @@ export default function MapView({
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !guide) return;
-    lastExploredRef.current = guide.title.trim().toLowerCase();
     onExploringChangeRef.current?.(null);
+    // `lastScopeKeyRef` is deliberately NOT reset here. The guide that just
+    // arrived may be titled differently from the name we resolved to get it
+    // ("Kyoto Prefecture" → "Kyoto (prefecture)"), and forgetting the decision
+    // would have the very next settle propose that same place again, forever.
+    // It is cleared in runRescope instead, when the view and the guide agree.
 
     // Exploratory loads (zoom/pan "guess the region") must not move the camera —
     // just let the new region's pins appear where the user is already looking.

@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { CATEGORY_MAP } from '../data/categories';
 import { useAppStore, savedFromDestination } from '../store/useAppStore';
 import { useI18n } from '../i18n';
+import { EXTERNAL_REASONS } from '../data/ranking';
 import type { CategoryId, Destination, Guide } from '../types';
 import FeedbackControls from './FeedbackControls';
 import PinButton from './PinButton';
@@ -28,13 +29,6 @@ const ATTRIB = {
    *  duplicated rather than exported, so this module keeps exporting components
    *  only. Both disappear when these strings move to i18n. */
   badgeTip: 'Pocket Planet’s own score, not a source’s rating',
-  externalLabel: 'What outside sources said',
-  /** Shown when the ranker flagged an outside mention. Says what we know AND
-   *  what we don't: the guide carries no per-source tally for a place. */
-  externalNoBreakdown:
-    'Recorded as a mention only. The guide doesn’t keep a per-source tally for a place, so we can’t say which of the sources below it was, or how many times.',
-  externalNone:
-    'Nothing recorded. This place wasn’t matched to any of the outside sources read for this guide, so its position comes from its listing alone.',
   sourceMix: 'Read across the whole guide',
   /** The chip counts are guide-wide. Without this line they would be read as
    *  "4 Lonely Planet mentions of THIS place", which is not what they are. */
@@ -42,11 +36,13 @@ const ATTRIB = {
 } as const;
 
 /**
- * A source's publisher, taken from its URL host.
+ * A source's publisher, from its URL host.
  *
- * The host is a fact already in the payload, so grouping by it invents nothing.
- * (`meta.sources` drops the server's own `provider` field, and carries no
- * per-place breakdown at all — hence the caveats above.)
+ * Only a fallback now: `meta.sources[].provider` carries the publisher the
+ * server actually recorded, and that is used when present. Older payloads (and
+ * anything served from a cache built before that field existed) still arrive
+ * without it, and the host is a fact already in the payload, so reading it back
+ * out invents nothing.
  */
 const HOST_LABELS: ReadonlyArray<readonly [RegExp, string]> = [
   [/(^|\.)lonelyplanet\.com$/i, 'Lonely Planet'],
@@ -70,22 +66,80 @@ function providerOf(url: string): string {
 }
 
 /** Publisher → how many of the guide's sources came from it, most first. */
-function providerMix(sources: ReadonlyArray<{ url: string }>): Array<[string, number]> {
+function providerMix(
+  sources: ReadonlyArray<{ url: string; provider?: string }>,
+): Array<[string, number]> {
   const by = new Map<string, number>();
   for (const s of sources) {
-    const p = providerOf(s.url);
+    const p = s.provider || providerOf(s.url);
     by.set(p, (by.get(p) ?? 0) + 1);
   }
   return [...by.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
 }
 
 /**
- * The one reason the ranker emits that is about an OUTSIDE source rather than
- * about the listing itself (see `rawScore` in data/ranking.ts). Reasons are fixed
- * English literals produced by the ranker — they never go through i18n — so
- * matching on the wording is stable.
+ * Legacy fallback for guides assembled before the ranker emitted reason CODES:
+ * back then the only outside-source reason was an English sentence, matched on
+ * its wording. Live guides are split by `EXTERNAL_REASONS` instead.
  */
-const EXTERNAL_REASON_RE = /trusted travel sources/i;
+const EXTERNAL_REASON_RE = /trusted travel sources|mentioned by name/i;
+
+/** One reason, as a stable key plus the text to show for it. */
+interface ShownReason {
+  key: string;
+  text: string;
+  external: boolean;
+}
+
+/**
+ * The ranker's reasons, translated.
+ *
+ * It runs on the server and has no idea who is reading, so it emits stable
+ * `reason_*` codes and the English sentences side by side. Codes are what we
+ * render — that is what made these lines localizable — and the English text is
+ * the fallback for a guide that predates them.
+ */
+function shownReasons(d: Destination, t: (k: string) => string): ShownReason[] {
+  if (d.reasonCodes?.length) {
+    return d.reasonCodes.map((code) => ({
+      key: code,
+      text: t(code),
+      external: EXTERNAL_REASONS.has(code),
+    }));
+  }
+  return d.reasons.map((r) => ({ key: r, text: r, external: EXTERNAL_REASON_RE.test(r) }));
+}
+
+/**
+ * Per-source mention counts for one place, biggest first.
+ *
+ * These are raw counts of how often each source's text NAMES the place. They
+ * are presented as exactly that everywhere they appear: a place being talked
+ * about is not the same as a source recommending it, and the number is not a
+ * rating out of anything.
+ */
+function mentionEntries(d: Destination): Array<[string, number]> {
+  return Object.entries(d.mentions ?? {})
+    .filter(([, n]) => n > 0)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+}
+
+/** The per-source counts as chips. The caveat that keeps them from being read
+ *  as ratings is the caller's job — never render these without it nearby. */
+function MentionChips({ d }: { d: Destination }) {
+  const entries = mentionEntries(d);
+  if (!entries.length) return null;
+  return (
+    <div className="prov__mix prov__mix--mentions">
+      {entries.map(([provider, n]) => (
+        <span className="prov__chip" key={provider}>
+          {provider}
+          <span className="prov__chipn">{n}×</span>
+        </span>
+      ))}
+    </div>
+  );
+}
 
 /**
  * One photo slot, shared by the card thumbnail and the detail hero.
@@ -199,11 +253,13 @@ export function RankProvenance({ d, location }: { d: Destination; location: stri
   const mix = providerMix(sources);
 
   // Split the ranker's reasons by WHO they come from. Conflating "this listing
-  // has a photo" (something we measured) with "an outside source recommends it"
-  // (something someone else said) is exactly the confusion this panel exists to
+  // has a photo" (something we measured) with "an outside source names it"
+  // (something someone else wrote) is exactly the confusion this panel exists to
   // undo, so they never share a list.
-  const externalReasons = d.reasons.filter((r) => EXTERNAL_REASON_RE.test(r));
-  const listingReasons = d.reasons.filter((r) => !EXTERNAL_REASON_RE.test(r));
+  const reasons = shownReasons(d, t);
+  const externalReasons = reasons.filter((r) => r.external);
+  const listingReasons = reasons.filter((r) => !r.external);
+  const mentions = mentionEntries(d);
 
   return (
     <div className="prov">
@@ -227,9 +283,9 @@ export function RankProvenance({ d, location }: { d: Destination; location: stri
         {listingReasons.length > 0 ? (
           <ul className="prov__reasons">
             {listingReasons.map((r) => (
-              <li key={r}>
+              <li key={r.key}>
                 <span className="prov__check">✓</span>
-                <span>{r}</span>
+                <span>{r.text}</span>
               </li>
             ))}
           </ul>
@@ -238,24 +294,35 @@ export function RankProvenance({ d, location }: { d: Destination; location: stri
         )}
       </div>
 
+      {/* "Ranked by who?" — answered per place, with the actual per-source
+          counts the ranker used. This section used to have to admit that no
+          per-source tally was kept; `Destination.mentions` now carries the raw
+          numbers, so the honest thing is to show them, labelled as what they
+          are. Never a rating, never "recommended by". */}
       <div className="prov__section">
-        <div className="prov__label">{ATTRIB.externalLabel}</div>
-        {externalReasons.length > 0 ? (
+        <div className="prov__label">{t('mentions_label')}</div>
+        {mentions.length > 0 ? (
           <>
+            <MentionChips d={d} />
             <ul className="prov__reasons">
               {externalReasons.map((r) => (
-                <li key={r}>
-                  {/* A quote mark, not a checkmark: this is someone else's word,
+                <li key={r.key}>
+                  {/* A quote mark, not a checkmark: this is someone else's page,
                       not a box we ticked. */}
                   <span className="prov__quote">❝</span>
-                  <span>{r}</span>
+                  <span>{r.text}</span>
                 </li>
               ))}
             </ul>
-            <p className="prov__note">{ATTRIB.externalNoBreakdown}</p>
+            {d.mentionScore != null && d.mentionScore > 0 && (
+              <p className="prov__note">
+                +{d.mentionScore} {t('mentions_boost')}
+              </p>
+            )}
+            <p className="prov__note">{t('mentions_note')}</p>
           </>
         ) : (
-          <p className="prov__none">{ATTRIB.externalNone}</p>
+          <p className="prov__none">{t('mentions_none')}</p>
         )}
       </div>
 
@@ -410,6 +477,16 @@ export default function DestinationDetail({ d, location }: { d: Destination; loc
         </button>
       </div>
       <h2 className="detail__title">{d.name}</h2>
+
+      {/* Per-source signal, visible without opening anything — "ranked by who?"
+          should not require a click. Hidden while the full panel is open, which
+          shows the same chips with their caveat attached. */}
+      {!showProvenance && d.mentions && Object.keys(d.mentions).length > 0 && (
+        <div className="detail__mentions">
+          <span className="detail__mentions-label">{t('mentions_label')}</span>
+          <MentionChips d={d} />
+        </div>
+      )}
 
       {showProvenance && <RankProvenance d={d} location={location} />}
 

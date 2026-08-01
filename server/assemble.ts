@@ -2,7 +2,7 @@
 // (ingested web sources) + learned adjustments (feedback + self-tuning).
 
 import { getGuide } from '../src/data/wikivoyage.ts';
-import { applyLearning } from '../src/core/learning.ts';
+import { applyLearning, OVERRIDE_CAP } from '../src/core/learning.ts';
 import { normalizeName } from '../src/data/ranking.ts';
 import type { Destination, Guide, GuideMeta } from '../src/types.ts';
 import { getLLM } from './llm/adapter.ts';
@@ -49,12 +49,20 @@ const DISCUSSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 // Per-source mention weight: Lonely Planet is authoritative editorial; Reddit +
 // YouTube are recommendation-rich; SE Travel skews to logistics (counts less).
-const BUZZ_WEIGHT: Record<string, number> = {
+//
+// Reported to the client in `meta.scoring` rather than restated in the UI: the
+// Learn tab explains how the score is calculated, and a hand-copied table there
+// would quietly become a lie the first time one of these numbers changed.
+export const BUZZ_WEIGHT: Record<string, number> = {
   [LP_PROVIDER]: 8,
   Reddit: 5,
   [YOUTUBE_PROVIDER]: 4,
   'Travel Stack Exchange': 2,
 };
+/** Ceiling on the total mention boost for a single place. */
+export const BUZZ_CAP = 24;
+/** Weight used for a mention source with no entry in BUZZ_WEIGHT. */
+const BUZZ_WEIGHT_DEFAULT = 2;
 // Transport hubs dominate logistics chatter — never buzz-boost them.
 const TRANSPORT_RE = /\b(station|airport|terminal|bus stop|interchange|metro|subway|railway)\b/i;
 
@@ -103,7 +111,7 @@ function computeBuzz(destinations: Destination[], sources: KbSource[]): BuzzResu
   const corpora = disc.map((s) => ({
     text: s.summary,
     provider: s.provider,
-    w: BUZZ_WEIGHT[s.provider] ?? 2,
+    w: BUZZ_WEIGHT[s.provider] ?? BUZZ_WEIGHT_DEFAULT,
   }));
   const buzz: Record<string, number> = {};
   const mentions: Record<string, Record<string, number>> = {};
@@ -123,7 +131,7 @@ function computeBuzz(destinations: Destination[], sources: KbSource[]): BuzzResu
     }
     if (weighted > 0) {
       const key = normalizeName(d.name);
-      buzz[key] = Math.min(24, weighted);
+      buzz[key] = Math.min(BUZZ_CAP, weighted);
       mentions[key] = perProvider;
     }
   }
@@ -612,6 +620,15 @@ export async function assembleGuide(query: string, lang = 'en'): Promise<GuideRe
     learnedVersion: learned.version,
     feedbackApplied,
     ingestedPois: extras.length,
+    // The real numbers this guide was scored with — the learned weights, not
+    // the compiled-in defaults, which after 24 training passes are no longer
+    // the same thing.
+    scoring: {
+      weights: { ...learned.weights },
+      mentionWeights: { ...BUZZ_WEIGHT },
+      mentionCap: BUZZ_CAP,
+      feedbackCap: OVERRIDE_CAP,
+    },
     sources: sources.map((s) => ({
       title: s.title,
       url: s.url,

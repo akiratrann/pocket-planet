@@ -193,9 +193,20 @@ export function savedFromDestination(d: Destination, location: string): SavedPla
 
 export type PanelTab = 'explore' | 'advice' | 'learn' | 'itinerary' | 'travel';
 
+/**
+ * Who chose the place currently loaded. `'search'` means the user named it — a
+ * typed search, a suggestion, an example chip — and it must not be replaced
+ * behind their back; `'map'` means the app picked it while the user roamed, and
+ * the app may pick again. This is the difference between the map re-scoping
+ * automatically and it merely offering to.
+ */
+export type QuerySource = 'search' | 'map';
+
 interface AppState {
   /** The place currently being explored (submitted search). */
   query: string;
+  /** Whether `query` came from the user or from map exploration. */
+  querySource: QuerySource;
   /** UI + place-name language preference (ISO code). */
   language: string;
   /** Categories toggled on. Empty set = show all. */
@@ -277,6 +288,10 @@ export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
       query: 'Kyoto',
+      // The opening destination is a starting point the app chose, but it is
+      // presented as if searched: treat it as the user's until they move, so a
+      // first zoom-out offers rather than silently replaces it.
+      querySource: 'search',
       language: initialLanguage(),
       activeCategories: new Set<CategoryId>(),
       selectedId: null,
@@ -296,12 +311,24 @@ export const useAppStore = create<AppState>()(
       // a spinner in a tab that has nothing to do with the search, which read as
       // the itinerary being wiped by the search.
       setQuery: (q) =>
-        set({ query: q, selectedId: null, frameOnLoad: true, panelTab: 'explore' }),
+        set({
+          query: q,
+          querySource: 'search',
+          selectedId: null,
+          frameOnLoad: true,
+          panelTab: 'explore',
+        }),
       // Map-driven loads also belong on Explore: clicking a city label while
       // reading Advice should show that city's places, not leave you on a tab
       // describing somewhere else.
       exploreTo: (q) =>
-        set({ query: q, selectedId: null, frameOnLoad: false, panelTab: 'explore' }),
+        set({
+          query: q,
+          querySource: 'map',
+          selectedId: null,
+          frameOnLoad: false,
+          panelTab: 'explore',
+        }),
       setLanguage: (lang) => {
         if (typeof window !== 'undefined') localStorage.setItem('pp-lang', lang);
         set({ language: lang });

@@ -67,7 +67,9 @@ export function locationKey(s: string): string {
   return s.trim().toLowerCase();
 }
 
-const OVERRIDE_CAP = 70;
+/** How far one place can be moved by traveller feedback, in either direction.
+ *  Exported so the Learn tab can quote the real ceiling. */
+export const OVERRIDE_CAP = 70;
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n));

@@ -45,8 +45,14 @@ export interface Destination {
   rank: number;
   /** Original position in the source article. */
   order: number;
-  /** Human-readable reasons the item scored the way it did (for transparency + tuning). */
+  /** Human-readable (English) reasons the item scored the way it did. */
   reasons: string[];
+  /**
+   * The same reasons as stable codes (`reason_*`, see src/data/ranking.ts), in
+   * the same order. The UI translates these; `reasons` is the fallback for a
+   * guide assembled before codes existed, and the text non-UI consumers read.
+   */
+  reasonCodes?: string[];
   /**
    * How many times each source provider's text names this place, e.g.
    * `{ "Lonely Planet": 3, "Reddit": 12 }`. These are literal name matches over
@@ -98,6 +104,22 @@ export interface LocationOpinions {
   sources: Array<{ title: string; url?: string }>;
 }
 
+/**
+ * The parts of the scoring model that live on the server, reported with the
+ * guide so the Learn tab can describe the numbers the ranker ACTUALLY used
+ * instead of a second copy of them that can drift.
+ */
+export interface ScoringMeta {
+  /** Ranking weights in force for this guide (learned, not the defaults). */
+  weights: Record<string, number>;
+  /** Publisher -> points added per time that publisher's text names a place. */
+  mentionWeights: Record<string, number>;
+  /** Ceiling on the total mention boost one place can receive. */
+  mentionCap: number;
+  /** Ceiling on how far one traveller correction can move a place, either way. */
+  feedbackCap: number;
+}
+
 export interface GuideMeta {
   provider: string;
   learnedVersion: number;
@@ -113,6 +135,8 @@ export interface GuideMeta {
   ingestedPois: number;
   /** What travellers say (positive + negative), grounded in real sources. */
   opinions?: LocationOpinions;
+  /** How this guide was scored (for the Learn tab's methodology section). */
+  scoring?: ScoringMeta;
 }
 
 export interface Guide {
@@ -128,7 +152,17 @@ export interface Guide {
   sourceUrl: string;
   /** Sub-regions / child destinations (for country/region scope drill-down). */
   related: string[];
-  /** Parent region from Wikivoyage's breadcrumb (e.g. Yamagata → Tōhoku), for zoom-out drill-up. */
+  /**
+   * The region this place sits inside, from Wikivoyage's `{{IsPartOf}}`
+   * breadcrumb (Nakatsugawa → "Gifu (prefecture)"). ONE level up, not a full
+   * chain — walking to the root would cost a Wikivoyage fetch per ancestor.
+   *
+   * This is editorial hierarchy, which is the right answer for "where is this?"
+   * and the wrong answer for "what am I looking at?" — map scope is resolved
+   * from the viewport instead (see scopeForSpanKm in src/data/geocode.ts),
+   * because Kyoto's breadcrumb parent is Kansai when a country-sized viewport
+   * means Japan.
+   */
   parent?: string;
   /** Present when assembled by the backend brain (RAG + learning). */
   meta?: GuideMeta;

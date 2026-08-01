@@ -137,6 +137,55 @@ export async function fetchGuide(query: string, lang = 'en'): Promise<Guide> {
   }
 }
 
+// --- Personalization --------------------------------------------------------
+
+/** A category the signed-in account saves places from, and how many. */
+export interface PersonalCategory {
+  category: CategoryId;
+  saved: number;
+}
+
+export interface PersonalPick {
+  id: string;
+  name: string;
+  category: CategoryId;
+  score: number;
+  rank: number;
+  image?: string;
+  description?: string;
+  /** The saved places that produced this pick — the only reason we can give. */
+  because: PersonalCategory;
+}
+
+/**
+ * One account's view of one guide. Computed server-side from that account's own
+ * pins and itinerary stops (the only per-user state the backend holds), so it
+ * follows the user across devices rather than depending on this browser.
+ */
+export interface Personalization {
+  name: string;
+  location: string;
+  savedTotal: number;
+  savedHere: number;
+  taste: PersonalCategory[];
+  picks: PersonalPick[];
+}
+
+/** Null when signed out (the endpoint 401s) or the backend is unreachable. */
+export async function fetchPersonal(
+  location: string,
+  lang = 'en',
+): Promise<Personalization | null> {
+  if (!authToken) return null;
+  try {
+    return await apiFetch<Personalization>(
+      `/personal?q=${encodeURIComponent(location)}&lang=${encodeURIComponent(lang)}`,
+    );
+  } catch {
+    return null;
+  }
+}
+
 export interface FeedbackInput {
   location: string;
   name?: string;

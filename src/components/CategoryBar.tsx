@@ -73,9 +73,11 @@ export default function CategoryBar({ counts }: { counts: Record<string, number>
                   (on ? ' chip--on' : '') +
                   (count === 0 ? ' chip--disabled' : '')
                 }
-                style={
-                  on ? { background: c.color, borderColor: c.color, color: '#fff' } : undefined
-                }
+                // No per-category fill. Eight selected chips in eight brand
+                // colours is a legend the reader has to learn, and it spends
+                // the colour budget the score badge needs. Selection is
+                // carried by an ink fill plus the checkmark below — two
+                // channels, neither of them hue. See .chip--on in App.css.
                 title={c.blurb}
               >
                 <input

@@ -199,9 +199,52 @@ export function normalizeName(name: string): string {
   return name.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
+// ---------------------------------------------------------------------------
+// Reasons.
+//
+// The ranker runs on the SERVER, where the reader's language isn't its concern,
+// so every reason it emits is produced twice: a stable machine code and the
+// English sentence. The code is what the UI translates (see `reason_*` in
+// src/i18n.ts) and what other code should match on; the English text is what
+// non-UI consumers read (the chat prompt, logs) and the UI's fallback when a
+// guide was assembled before codes existed.
+//
+// Wording note: the mention signal counts how often a place is NAMED in the
+// sources we read. That is evidence it gets talked about — not that anybody
+// recommended it, and not a rating — so the sentence says "mentioned".
+// ---------------------------------------------------------------------------
+export const REASON = {
+  wikidata: 'reason_wikidata',
+  photo: 'reason_photo',
+  described: 'reason_described',
+  highlight: 'reason_highlight',
+  feedbackUp: 'reason_feedback_up',
+  feedbackDown: 'reason_feedback_down',
+  mentioned: 'reason_mentioned',
+  civic: 'reason_civic',
+} as const;
+
+export type ReasonCode = (typeof REASON)[keyof typeof REASON];
+
+/** English text for each reason code (the server-side / fallback rendering). */
+export const REASON_TEXT: Record<ReasonCode, string> = {
+  [REASON.wikidata]: 'Recognised place (Wikidata entry)',
+  [REASON.photo]: 'Has a photo',
+  [REASON.described]: 'Richly described',
+  [REASON.highlight]: 'Described as a highlight',
+  [REASON.feedbackUp]: 'Boosted by traveller feedback',
+  [REASON.feedbackDown]: 'Down-weighted by traveller feedback',
+  [REASON.mentioned]: 'Mentioned by name in travel discussions and editorial articles',
+  [REASON.civic]: 'Not a visitable attraction (civic or utility building)',
+};
+
+/** The reason that is about OUTSIDE sources rather than about the listing. */
+export const EXTERNAL_REASONS: ReadonlySet<string> = new Set<string>([REASON.mentioned]);
+
 interface ScoredRaw {
   raw: number;
   reasons: string[];
+  codes: string[];
 }
 
 function rawScore(
@@ -213,18 +256,21 @@ function rawScore(
   buzz: Record<string, number>,
 ): ScoredRaw {
   let score = w.base;
-  const reasons: string[] = [];
+  const codes: string[] = [];
+  const add = (code: ReasonCode) => {
+    codes.push(code);
+  };
 
   if (d.lat != null && d.lon != null) {
     score += w.hasCoordinates;
   }
   if (d.wikidata) {
     score += w.hasWikidata;
-    reasons.push('Recognised place (Wikidata entry)');
+    add(REASON.wikidata);
   }
   if (d.image) {
     score += w.hasImage;
-    reasons.push('Has a photo');
+    add(REASON.photo);
   }
   if (d.url) score += w.hasUrl;
   if (d.hours) score += w.hasHours;
@@ -237,7 +283,7 @@ function rawScore(
     const pts = frac * w.descriptionLengthMax;
     score += pts;
     if (descLen > w.descriptionLengthChars * 0.6) {
-      reasons.push('Richly described');
+      add(REASON.described);
     }
   }
 
@@ -249,19 +295,22 @@ function rawScore(
   if (matches && matches.length) {
     const bonus = Math.min(w.notableKeywordCap, matches.length * w.notableKeywordBonus);
     score += bonus;
-    reasons.push('Described as a highlight');
+    add(REASON.highlight);
   }
 
   const override = overrides[normalizeName(d.name)];
   if (override) {
     score += override;
-    reasons.push(override > 0 ? 'Boosted by traveller feedback' : 'Down-weighted by traveller feedback');
+    add(override > 0 ? REASON.feedbackUp : REASON.feedbackDown);
   }
 
   const buzzBoost = buzz[normalizeName(d.name)];
   if (buzzBoost) {
     score += buzzBoost;
-    reasons.push('Recommended in trusted travel sources (Lonely Planet, Reddit, forums)');
+    // Counting how often a place is NAMED is not the same as anyone endorsing
+    // it, and this line used to say "Recommended in trusted travel sources",
+    // which asserted an endorsement the data cannot support.
+    add(REASON.mentioned);
   }
 
   // Applied last so it outweighs the signals that put civic buildings high in
@@ -271,10 +320,14 @@ function rawScore(
     // Weights are persisted to disk and reloaded, so a state saved before this
     // one existed has no value for it — fall back rather than score NaN.
     score -= Number.isFinite(w.civicNamePenalty) ? w.civicNamePenalty : RANKING_WEIGHTS.civicNamePenalty;
-    reasons.push('Not a visitable attraction (civic or utility building)');
+    add(REASON.civic);
   }
 
-  return { raw: Math.max(0, score), reasons };
+  return {
+    raw: Math.max(0, score),
+    codes,
+    reasons: codes.map((c) => REASON_TEXT[c as ReasonCode] ?? c),
+  };
 }
 
 /**
@@ -295,16 +348,17 @@ export function rankDestinations(
   const scored = destinations.map((d) => {
     const orderInCategory = seenPerCategory[d.category] ?? 0;
     seenPerCategory[d.category] = orderInCategory + 1;
-    const { raw, reasons } = rawScore(d, orderInCategory, weights, prominenceRe, overrides, buzz);
-    return { d, raw, reasons };
+    const { raw, reasons, codes } = rawScore(d, orderInCategory, weights, prominenceRe, overrides, buzz);
+    return { d, raw, reasons, codes };
   });
 
   const max = Math.max(1, ...scored.map((s) => s.raw));
 
-  const withScores: Destination[] = scored.map(({ d, raw, reasons }) => ({
+  const withScores: Destination[] = scored.map(({ d, raw, reasons, codes }) => ({
     ...d,
     score: Math.round((raw / max) * 100),
     reasons,
+    reasonCodes: codes,
   }));
 
   // Assign per-category rank.

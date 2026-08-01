@@ -61,7 +61,9 @@ const en: Dict = {
   stage_discussions: 'Mining traveller discussions…',
   stage_editorial: 'Reading editorial travel articles…',
   stage_photos: 'Looking up photos…',
-  stage_ranking: 'Ranking places by how strongly they\'re recommended…',
+  // Not "by how strongly they're recommended" — nothing recommends them. The
+  // ranker scores how well documented a place is and how often sources name it.
+  stage_ranking: 'Scoring and ranking places…',
   back_to_list: '← Back to list',
   explore_move: 'Explore as I move',
   on: 'On',
@@ -172,20 +174,32 @@ const en: Dict = {
   cat_shopping: 'Shopping',
   cat_activities: 'Activities & Tours',
   cat_sleep: 'Where to Stay',
+  // Score bands. The 0-100 score is quantised into four named steps so the
+  // number has a vocabulary — "62" alone tells a reader nothing about whether
+  // the place is worth their afternoon. Deliberately none of these is a
+  // failure word: the lowest band is a minor entry in a guide, not an error.
+  band_essential: 'Essential',
+  band_excellent: 'Excellent',
+  band_worth: 'Worth it',
+  band_minor: 'Minor',
   // Ranking transparency ("why is this #3?").
   why_rank: 'Why',
   why_rank_short: 'Why?',
   of: 'of',
   in: 'in',
   score_basis:
-    'The score is relative: the strongest recommendation in this guide sets 100, and everything else is scaled against it.',
+    'The score is relative: the highest-scoring place in this guide sets 100, and everything else is scaled against it.',
   rank_scope: 'The # is this place’s position within its own category.',
   what_lifted_it: 'What lifted it',
   no_signals:
     'No standout signal was found when this was scored. It ranks on how much detail its listing carries and where it appears in the source guide — nothing more.',
   ranked_by: 'Ranked by',
+  // "boosted when real travellers keep recommending it" used to end this line.
+  // Nothing in the model reads a recommendation — the boost comes from counting
+  // how often a place is NAMED in the sources we read, which is a different
+  // claim and the only one the data supports.
   ranked_by_body:
-    'Pocket Planet, from the sources below. Every listing is scored on how fully travel sources document it, then boosted when real travellers keep recommending it.',
+    'Pocket Planet, from the sources below. Every listing is scored on how fully travel sources document it, then lifted when those sources name it repeatedly. See the Learn tab for the full method.',
   corrections_applied: 'traveller corrections applied to',
   model_version: 'ranking model v',
   sources_used: 'Sources for this guide',
@@ -197,6 +211,99 @@ const en: Dict = {
   // Photo coverage is partial by nature; say so plainly rather than showing a
   // failed-image box or, worse, a stock photo of somewhere else.
   photo_none: 'No photo yet',
+
+  // --- Ranking reasons ------------------------------------------------------
+  // The ranker runs server-side and emits these as codes (see REASON in
+  // src/data/ranking.ts) precisely so they can be translated here; it used to
+  // emit English sentences that reached readers of all twelve languages
+  // untouched. Keep the wording of `reason_mentioned` factual: it counts how
+  // often a place is NAMED, which is not an endorsement.
+  reason_wikidata: 'Recognised place (Wikidata entry)',
+  reason_photo: 'Has a photo',
+  reason_described: 'Richly described',
+  reason_highlight: 'Described as a highlight',
+  reason_feedback_up: 'Boosted by traveller feedback',
+  reason_feedback_down: 'Down-weighted by traveller feedback',
+  reason_mentioned: 'Mentioned by name in travel discussions and editorial articles',
+  reason_civic: 'Not a visitable attraction (civic or utility building)',
+
+  // --- Per-source mentions ("ranked by who?") -------------------------------
+  mentions_label: 'Mentioned in',
+  mentions_note:
+    'How many times each source we read names this place. It is evidence the place gets talked about — not a rating, and not a recommendation by that source.',
+  mentions_none:
+    'None. No source read for this guide names this place, so its position comes from its own listing.',
+  mentions_boost: 'points added to the score',
+
+  // --- Personalization ------------------------------------------------------
+  for_you: 'For you',
+  for_you_because: 'Because you saved',
+  for_you_empty:
+    'You haven’t saved anything yet. Pin a place, or add one to an itinerary, and this becomes a shortlist drawn from what you saved.',
+  for_you_basis: 'Based on the places saved to your account',
+  for_you_none:
+    'Nothing new to pick out here — you have already saved everything this guide lists in the categories you save from.',
+  for_you_note:
+    'Scores and ranks are the same for everyone. Your account only changes which places are picked out here.',
+  saved_here: 'already saved from this guide',
+
+  // --- What an account actually personalises (Learn tab) --------------------
+  learn_personal_title: 'What is personalised for you',
+  learn_personal_body:
+    'Everything personal in Pocket Planet comes from one thing: the places you save. This is all of it.',
+  learn_personal_saved: 'places saved to your account',
+  learn_personal_here: 'of them are in this guide',
+  learn_personal_cats: 'Categories you save from',
+  learn_personal_none:
+    'Nothing saved yet, so nothing is personalised. Pin a place, or add one to an itinerary, and the “For you” shortlist on Explore starts working.',
+  learn_personal_note:
+    'That is the entire profile. There is no other model of you — no browsing history, no inferred interests, nothing bought from anywhere else — and what you save never changes what anyone else is shown.',
+  learn_personal_guest:
+    'You are browsing as a guest. Guides, scores and ranks are identical for everyone, signed in or not. What an account adds is that your pins and itineraries are stored on it (so they follow you between devices) and that the “For you” shortlist on Explore can be drawn from them.',
+
+  // --- Scoring methodology (Learn tab) --------------------------------------
+  // Long-form and English-only for now, like the rest of the Learn tab; missing
+  // keys fall back to English, so adding translations later is safe.
+  score_how_title: 'How the score is calculated',
+  score_how_intro:
+    'Every place in this guide carries a score out of 100. Pocket Planet works that number out itself, from the signals below. It is not a rating published by Lonely Planet, Reddit, YouTube or any other source we read — none of them scores places for us.',
+  score_start: 'Each place starts at',
+  score_points: 'points',
+  score_signals_label: 'Then these signals are added or subtracted',
+  score_scale_label: 'Turning that into a score out of 100',
+  score_scale_body:
+    'The highest raw total in this guide is set to 100 and every other place is scaled against it. A score therefore only compares places inside one guide: 86 here and 86 in another city do not mean the same thing. The # beside a place is its position within its own category, not overall.',
+  score_not_label: 'What the score does not mean',
+  score_not_quality:
+    'It is not a quality or enjoyment rating. Nothing in the model has been anywhere or knows what you like.',
+  score_not_rating:
+    'It is not a star rating or a popularity vote. No visitor numbers, ticket sales or review scores are involved — we have none.',
+  score_not_endorsement:
+    'A mention count means a place is talked about in the sources we read, not that anyone recommended it.',
+  score_not_fair:
+    'It rewards being well documented. A wonderful place with a two-line entry and no photo will score below an ordinary one with a complete listing, and that is a limitation of the method, not a judgement about the place.',
+  score_weights_note:
+    'These are the weights this guide was actually scored with — the model’s current version, not the defaults it shipped with. The training pass below adjusts them from recorded signal.',
+  score_weights_default_note:
+    'The backend did not report its weights for this guide, so the defaults compiled into the app are shown instead. The real ones may differ.',
+  // Signal labels, in the order the ranker applies them.
+  sig_wikidata: 'Has a Wikidata entry (a recognised real-world thing)',
+  sig_image: 'A real photo of it was found',
+  sig_coordinates: 'Has map coordinates',
+  sig_url: 'Has a website',
+  sig_address: 'Has an address',
+  sig_hours: 'Has opening hours',
+  sig_price: 'Has prices',
+  sig_description: 'Length of its description, in full at',
+  sig_chars: 'characters',
+  sig_order: 'Listed early in its section of the source guide',
+  sig_keywords: 'Each prominence word in its description (UNESCO, iconic, must-see…)',
+  sig_keywords_cap: 'capped at',
+  sig_mentions: 'Mentioned by name in the sources read for this guide',
+  sig_mentions_per: 'per mention',
+  sig_feedback: 'Corrections from signed-in travellers',
+  sig_civic: 'Its name says it is a civic or utility building (school, post office…)',
+  sig_upto: 'up to',
 };
 
 const es: Dict = {
@@ -240,6 +347,32 @@ const es: Dict = {
   tab_travel: 'Viaje',
   filters: 'Filtros',
   clear: 'Borrar',
+  search_suggestions: 'Destinos',
+  search_popular: 'Destinos populares',
+  search_searching: 'Buscando lugares…',
+  search_no_matches: 'Ningún destino coincide',
+  reason_wikidata: 'Lugar reconocido (ficha en Wikidata)',
+  reason_photo: 'Tiene foto',
+  reason_described: 'Descripción detallada',
+  reason_highlight: 'Descrito como imprescindible',
+  reason_feedback_up: 'Promovido por comentarios de viajeros',
+  reason_feedback_down: 'Rebajado por comentarios de viajeros',
+  reason_mentioned: 'Mencionado por su nombre en debates y artículos de viajes',
+  reason_civic: 'No es una atracción visitable (edificio público o de servicios)',
+  mentions_label: 'Mencionado en',
+  mentions_note:
+    'Cuántas veces cada fuente que leímos nombra este lugar. Indica que se habla de él: no es una valoración ni una recomendación de esa fuente.',
+  mentions_none:
+    'Ninguna. Ninguna fuente leída para esta guía nombra este lugar, así que su posición sale solo de su propia ficha.',
+  mentions_boost: 'puntos añadidos a la puntuación',
+  for_you: 'Para ti',
+  for_you_because: 'Porque guardaste',
+  for_you_empty:
+    'Aún no has guardado nada. Guarda un lugar o añádelo a un itinerario y aquí aparecerá una selección hecha con lo que guardaste.',
+  for_you_basis: 'Según los lugares guardados en tu cuenta',
+  for_you_note:
+    'Las puntuaciones y los puestos son iguales para todos. Tu cuenta solo cambia qué lugares se destacan aquí.',
+  saved_here: 'ya guardados de esta guía',
 };
 
 const fr: Dict = {
@@ -283,6 +416,32 @@ const fr: Dict = {
   tab_travel: 'Trajet',
   filters: 'Filtres',
   clear: 'Effacer',
+  search_suggestions: 'Destinations',
+  search_popular: 'Destinations populaires',
+  search_searching: 'Recherche de lieux…',
+  search_no_matches: 'Aucune destination ne correspond',
+  reason_wikidata: 'Lieu reconnu (fiche Wikidata)',
+  reason_photo: 'Photo disponible',
+  reason_described: 'Description détaillée',
+  reason_highlight: 'Décrit comme incontournable',
+  reason_feedback_up: 'Remonté par les retours des voyageurs',
+  reason_feedback_down: 'Rétrogradé par les retours des voyageurs',
+  reason_mentioned: 'Cité nommément dans des discussions et des articles de voyage',
+  reason_civic: 'Pas un site à visiter (bâtiment public ou technique)',
+  mentions_label: 'Mentionné dans',
+  mentions_note:
+    'Le nombre de fois où chaque source lue nomme ce lieu. Cela montre qu’on en parle : ce n’est ni une note ni une recommandation de cette source.',
+  mentions_none:
+    'Aucune. Aucune source lue pour ce guide ne nomme ce lieu ; sa position vient donc uniquement de sa propre fiche.',
+  mentions_boost: 'points ajoutés au score',
+  for_you: 'Pour vous',
+  for_you_because: 'Parce que vous avez enregistré',
+  for_you_empty:
+    'Vous n’avez encore rien enregistré. Épinglez un lieu ou ajoutez-en un à un itinéraire, et vous verrez ici une sélection tirée de vos enregistrements.',
+  for_you_basis: 'D’après les lieux enregistrés sur votre compte',
+  for_you_note:
+    'Les scores et les classements sont les mêmes pour tout le monde. Votre compte change seulement les lieux mis en avant ici.',
+  saved_here: 'déjà enregistrés dans ce guide',
 };
 
 const de: Dict = {
@@ -326,6 +485,32 @@ const de: Dict = {
   tab_travel: 'Anreise',
   filters: 'Filter',
   clear: 'Zurücksetzen',
+  search_suggestions: 'Reiseziele',
+  search_popular: 'Beliebte Reiseziele',
+  search_searching: 'Suche nach Orten…',
+  search_no_matches: 'Keine passenden Reiseziele',
+  reason_wikidata: 'Anerkannter Ort (Wikidata-Eintrag)',
+  reason_photo: 'Hat ein Foto',
+  reason_described: 'Ausführlich beschrieben',
+  reason_highlight: 'Als Highlight beschrieben',
+  reason_feedback_up: 'Durch Reisenden-Feedback hochgestuft',
+  reason_feedback_down: 'Durch Reisenden-Feedback herabgestuft',
+  reason_mentioned: 'Namentlich in Reisediskussionen und redaktionellen Artikeln erwähnt',
+  reason_civic: 'Keine besuchbare Sehenswürdigkeit (Behörden- oder Versorgungsgebäude)',
+  mentions_label: 'Erwähnt in',
+  mentions_note:
+    'Wie oft jede gelesene Quelle diesen Ort namentlich nennt. Das zeigt, dass über ihn gesprochen wird — es ist keine Bewertung und keine Empfehlung dieser Quelle.',
+  mentions_none:
+    'Keine. Keine für diesen Reiseführer gelesene Quelle nennt diesen Ort, seine Position stammt also allein aus seinem eigenen Eintrag.',
+  mentions_boost: 'Punkte, die zur Wertung addiert wurden',
+  for_you: 'Für dich',
+  for_you_because: 'Weil du gespeichert hast',
+  for_you_empty:
+    'Du hast noch nichts gespeichert. Merke dir einen Ort oder füge ihn einer Reise hinzu — dann steht hier eine Auswahl, die aus deinen gespeicherten Orten entsteht.',
+  for_you_basis: 'Basierend auf den in deinem Konto gespeicherten Orten',
+  for_you_note:
+    'Wertungen und Platzierungen sind für alle gleich. Dein Konto ändert nur, welche Orte hier hervorgehoben werden.',
+  saved_here: 'bereits aus diesem Reiseführer gespeichert',
 };
 
 const it: Dict = {
@@ -369,6 +554,32 @@ const it: Dict = {
   tab_travel: 'Viaggio',
   filters: 'Filtri',
   clear: 'Cancella',
+  search_suggestions: 'Destinazioni',
+  search_popular: 'Destinazioni popolari',
+  search_searching: 'Ricerca di luoghi…',
+  search_no_matches: 'Nessuna destinazione corrisponde',
+  reason_wikidata: 'Luogo riconosciuto (scheda Wikidata)',
+  reason_photo: 'Ha una foto',
+  reason_described: 'Descrizione dettagliata',
+  reason_highlight: 'Descritto come imperdibile',
+  reason_feedback_up: 'Promosso dai riscontri dei viaggiatori',
+  reason_feedback_down: 'Retrocesso dai riscontri dei viaggiatori',
+  reason_mentioned: 'Citato per nome in discussioni e articoli di viaggio',
+  reason_civic: 'Non è un’attrazione visitabile (edificio pubblico o di servizio)',
+  mentions_label: 'Citato in',
+  mentions_note:
+    'Quante volte ogni fonte letta nomina questo luogo. Indica che se ne parla: non è un voto né una raccomandazione di quella fonte.',
+  mentions_none:
+    'Nessuna. Nessuna fonte letta per questa guida nomina questo luogo, quindi la sua posizione dipende solo dalla sua scheda.',
+  mentions_boost: 'punti aggiunti al punteggio',
+  for_you: 'Per te',
+  for_you_because: 'Perché hai salvato',
+  for_you_empty:
+    'Non hai ancora salvato nulla. Salva un luogo o aggiungilo a un itinerario e qui comparirà una selezione basata su ciò che hai salvato.',
+  for_you_basis: 'In base ai luoghi salvati nel tuo account',
+  for_you_note:
+    'Punteggi e posizioni sono uguali per tutti. Il tuo account cambia solo quali luoghi vengono messi in evidenza qui.',
+  saved_here: 'già salvati da questa guida',
 };
 
 const pt: Dict = {
@@ -412,6 +623,32 @@ const pt: Dict = {
   tab_travel: 'Viagem',
   filters: 'Filtros',
   clear: 'Limpar',
+  search_suggestions: 'Destinos',
+  search_popular: 'Destinos populares',
+  search_searching: 'Procurando lugares…',
+  search_no_matches: 'Nenhum destino corresponde',
+  reason_wikidata: 'Lugar reconhecido (registro na Wikidata)',
+  reason_photo: 'Tem foto',
+  reason_described: 'Descrição detalhada',
+  reason_highlight: 'Descrito como imperdível',
+  reason_feedback_up: 'Promovido por comentários de viajantes',
+  reason_feedback_down: 'Rebaixado por comentários de viajantes',
+  reason_mentioned: 'Mencionado pelo nome em discussões e artigos de viagem',
+  reason_civic: 'Não é uma atração visitável (prédio público ou de serviços)',
+  mentions_label: 'Mencionado em',
+  mentions_note:
+    'Quantas vezes cada fonte lida cita este lugar pelo nome. Mostra que se fala dele: não é uma nota nem uma recomendação dessa fonte.',
+  mentions_none:
+    'Nenhuma. Nenhuma fonte lida para este guia cita este lugar, então a posição dele vem apenas da própria ficha.',
+  mentions_boost: 'pontos somados à pontuação',
+  for_you: 'Para você',
+  for_you_because: 'Porque você salvou',
+  for_you_empty:
+    'Você ainda não salvou nada. Salve um lugar ou adicione um a um roteiro e aqui aparecerá uma seleção feita a partir do que você salvou.',
+  for_you_basis: 'Com base nos lugares salvos na sua conta',
+  for_you_note:
+    'As pontuações e as posições são iguais para todos. Sua conta só muda quais lugares aparecem em destaque aqui.',
+  saved_here: 'já salvos deste guia',
 };
 
 const vi: Dict = {
@@ -491,6 +728,32 @@ const vi: Dict = {
   tab_travel: 'Di chuyển',
   filters: 'Bộ lọc',
   clear: 'Xóa',
+  search_suggestions: 'Điểm đến',
+  search_popular: 'Điểm đến phổ biến',
+  search_searching: 'Đang tìm địa điểm…',
+  search_no_matches: 'Không có điểm đến nào phù hợp',
+  reason_wikidata: 'Địa điểm được ghi nhận (có mục Wikidata)',
+  reason_photo: 'Có ảnh',
+  reason_described: 'Mô tả chi tiết',
+  reason_highlight: 'Được mô tả là điểm nổi bật',
+  reason_feedback_up: 'Được nâng hạng nhờ phản hồi của du khách',
+  reason_feedback_down: 'Bị hạ hạng do phản hồi của du khách',
+  reason_mentioned: 'Được nhắc tên trong các thảo luận và bài viết du lịch',
+  reason_civic: 'Không phải điểm tham quan (công trình hành chính hoặc tiện ích)',
+  mentions_label: 'Được nhắc đến trong',
+  mentions_note:
+    'Số lần mỗi nguồn chúng tôi đọc nhắc tên địa điểm này. Đó là bằng chứng địa điểm được bàn đến — không phải điểm đánh giá, cũng không phải lời giới thiệu của nguồn đó.',
+  mentions_none:
+    'Không có. Không nguồn nào được đọc cho hướng dẫn này nhắc tên địa điểm này, nên vị trí của nó chỉ đến từ chính mục thông tin của nó.',
+  mentions_boost: 'điểm được cộng vào điểm số',
+  for_you: 'Dành cho bạn',
+  for_you_because: 'Vì bạn đã lưu',
+  for_you_empty:
+    'Bạn chưa lưu địa điểm nào. Hãy ghim một địa điểm hoặc thêm vào lịch trình, và đây sẽ là danh sách rút gọn dựa trên những gì bạn đã lưu.',
+  for_you_basis: 'Dựa trên các địa điểm đã lưu trong tài khoản của bạn',
+  for_you_note:
+    'Điểm số và thứ hạng giống nhau với mọi người. Tài khoản của bạn chỉ thay đổi những địa điểm được nêu bật ở đây.',
+  saved_here: 'đã lưu từ hướng dẫn này',
 };
 
 const ja: Dict = {
@@ -534,6 +797,32 @@ const ja: Dict = {
   tab_travel: '移動',
   filters: 'フィルター',
   clear: 'クリア',
+  search_suggestions: '目的地',
+  search_popular: '人気の目的地',
+  search_searching: '場所を検索中…',
+  search_no_matches: '一致する目的地はありません',
+  reason_wikidata: '確認された場所（Wikidataに項目あり）',
+  reason_photo: '写真あり',
+  reason_described: '詳しい説明あり',
+  reason_highlight: '見どころとして紹介されている',
+  reason_feedback_up: '旅行者のフィードバックで上位に',
+  reason_feedback_down: '旅行者のフィードバックで下位に',
+  reason_mentioned: '旅行の議論や記事で名前が挙がっている',
+  reason_civic: '観光対象ではありません（公共・インフラ施設）',
+  mentions_label: '名前が挙がった出典',
+  mentions_note:
+    '読み込んだ各出典がこの場所の名前を挙げた回数です。話題になっている証拠であり、その出典による評価でも推薦でもありません。',
+  mentions_none:
+    'ありません。このガイドで読み込んだ出典のどれもこの場所に触れていないため、順位はこの場所自身の掲載情報のみによります。',
+  mentions_boost: 'スコアに加算された点数',
+  for_you: 'あなた向け',
+  for_you_because: '保存した場所',
+  for_you_empty:
+    'まだ何も保存されていません。場所をピン留めするか旅程に追加すると、保存した内容をもとにした候補がここに表示されます。',
+  for_you_basis: 'アカウントに保存した場所に基づいています',
+  for_you_note:
+    'スコアと順位は全員に共通です。アカウントによって変わるのは、ここで取り上げる場所だけです。',
+  saved_here: 'このガイドから保存済み',
 };
 
 const ko: Dict = {
@@ -577,6 +866,32 @@ const ko: Dict = {
   tab_travel: '이동',
   filters: '필터',
   clear: '지우기',
+  search_suggestions: '목적지',
+  search_popular: '인기 목적지',
+  search_searching: '장소를 찾는 중…',
+  search_no_matches: '일치하는 목적지가 없습니다',
+  reason_wikidata: '확인된 장소 (위키데이터 항목 있음)',
+  reason_photo: '사진 있음',
+  reason_described: '상세한 설명',
+  reason_highlight: '하이라이트로 소개됨',
+  reason_feedback_up: '여행자 피드백으로 상향',
+  reason_feedback_down: '여행자 피드백으로 하향',
+  reason_mentioned: '여행 토론과 기사에서 이름이 언급됨',
+  reason_civic: '방문할 명소가 아님 (행정·기반 시설 건물)',
+  mentions_label: '언급된 출처',
+  mentions_note:
+    '읽어 들인 각 출처가 이 장소를 이름으로 언급한 횟수입니다. 화제가 된다는 근거일 뿐, 그 출처의 평점이나 추천이 아닙니다.',
+  mentions_none:
+    '없음. 이 가이드를 위해 읽은 어떤 출처도 이 장소를 언급하지 않아, 순위는 자체 정보만으로 정해졌습니다.',
+  mentions_boost: '점수에 더해진 점',
+  for_you: '맞춤 추천',
+  for_you_because: '저장한 장소',
+  for_you_empty:
+    '아직 저장한 곳이 없습니다. 장소를 저장하거나 일정에 추가하면, 저장한 내용을 바탕으로 한 목록이 여기에 표시됩니다.',
+  for_you_basis: '계정에 저장한 장소를 기준으로 합니다',
+  for_you_note:
+    '점수와 순위는 모두에게 동일합니다. 계정에 따라 달라지는 것은 여기에서 골라 보여 주는 장소뿐입니다.',
+  saved_here: '이 가이드에서 이미 저장함',
 };
 
 const zh: Dict = {
@@ -620,6 +935,29 @@ const zh: Dict = {
   tab_travel: '交通',
   filters: '筛选',
   clear: '清除',
+  search_suggestions: '目的地',
+  search_popular: '热门目的地',
+  search_searching: '正在查找地点…',
+  search_no_matches: '没有匹配的目的地',
+  reason_wikidata: '已收录的地点（有维基数据条目）',
+  reason_photo: '有照片',
+  reason_described: '介绍详尽',
+  reason_highlight: '被描述为亮点',
+  reason_feedback_up: '因旅行者反馈而提升',
+  reason_feedback_down: '因旅行者反馈而下调',
+  reason_mentioned: '在旅行讨论和专题文章中被提到名字',
+  reason_civic: '不是可参观的景点（行政或市政设施）',
+  mentions_label: '提到它的来源',
+  mentions_note:
+    '我们读取的每个来源提到该地点名字的次数。这说明它被谈论，并不是该来源给出的评分或推荐。',
+  mentions_none: '没有。为本指南读取的来源都没有提到该地点，因此它的位置只取决于自身的条目。',
+  mentions_boost: '为分数增加的点数',
+  for_you: '为你推荐',
+  for_you_because: '因为你收藏了',
+  for_you_empty: '你还没有收藏任何地点。收藏一个地点或把它加入行程，这里就会根据你收藏的内容列出精选。',
+  for_you_basis: '依据你账号中收藏的地点',
+  for_you_note: '分数和排名对所有人都相同。你的账号只会改变这里挑出哪些地点。',
+  saved_here: '已从本指南收藏',
 };
 
 const ru: Dict = {
@@ -663,6 +1001,32 @@ const ru: Dict = {
   tab_travel: 'Дорога',
   filters: 'Фильтры',
   clear: 'Сбросить',
+  search_suggestions: 'Направления',
+  search_popular: 'Популярные направления',
+  search_searching: 'Ищем места…',
+  search_no_matches: 'Подходящих направлений нет',
+  reason_wikidata: 'Известное место (есть запись в Викиданных)',
+  reason_photo: 'Есть фотография',
+  reason_described: 'Подробное описание',
+  reason_highlight: 'Описано как главная достопримечательность',
+  reason_feedback_up: 'Поднято отзывами путешественников',
+  reason_feedback_down: 'Понижено отзывами путешественников',
+  reason_mentioned: 'Упоминается по названию в обсуждениях и статьях о путешествиях',
+  reason_civic: 'Не туристический объект (административное или техническое здание)',
+  mentions_label: 'Упоминается в',
+  mentions_note:
+    'Сколько раз каждый прочитанный источник называет это место. Это признак того, что о нём говорят, а не оценка и не рекомендация этого источника.',
+  mentions_none:
+    'Нигде. Ни один источник, прочитанный для этого путеводителя, не называет это место, поэтому его позиция определена только его собственной карточкой.',
+  mentions_boost: 'баллов добавлено к оценке',
+  for_you: 'Для вас',
+  for_you_because: 'Потому что вы сохранили',
+  for_you_empty:
+    'Вы пока ничего не сохранили. Сохраните место или добавьте его в маршрут — и здесь появится подборка на основе сохранённого.',
+  for_you_basis: 'На основе мест, сохранённых в вашем аккаунте',
+  for_you_note:
+    'Оценки и позиции одинаковы для всех. Аккаунт меняет только то, какие места выделены здесь.',
+  saved_here: 'уже сохранено из этого путеводителя',
 };
 
 const ar: Dict = {
@@ -706,6 +1070,32 @@ const ar: Dict = {
   tab_travel: 'التنقل',
   filters: 'عوامل التصفية',
   clear: 'مسح',
+  search_suggestions: 'الوجهات',
+  search_popular: 'وجهات شائعة',
+  search_searching: 'جارٍ البحث عن أماكن…',
+  search_no_matches: 'لا توجد وجهات مطابقة',
+  reason_wikidata: 'مكان معروف (له مدخل في ويكي بيانات)',
+  reason_photo: 'تتوفر صورة',
+  reason_described: 'وصف مفصّل',
+  reason_highlight: 'موصوف كأحد أبرز المعالم',
+  reason_feedback_up: 'ارتفع بفضل ملاحظات المسافرين',
+  reason_feedback_down: 'انخفض بسبب ملاحظات المسافرين',
+  reason_mentioned: 'ذُكر بالاسم في نقاشات ومقالات السفر',
+  reason_civic: 'ليس معلمًا يمكن زيارته (مبنى حكومي أو خدمي)',
+  mentions_label: 'ذُكر في',
+  mentions_note:
+    'عدد المرات التي ذكر فيها كل مصدر قرأناه اسم هذا المكان. هذا دليل على أنه محل حديث، وليس تقييمًا ولا توصية من ذلك المصدر.',
+  mentions_none:
+    'لا شيء. لم يذكر أي مصدر قرأناه لهذا الدليل هذا المكان، لذا فإن ترتيبه يعتمد على بياناته وحدها.',
+  mentions_boost: 'نقاط أُضيفت إلى الدرجة',
+  for_you: 'مختار لك',
+  for_you_because: 'لأنك حفظت',
+  for_you_empty:
+    'لم تحفظ أي مكان بعد. ثبّت مكانًا أو أضفه إلى خط سير، وستظهر هنا قائمة مختارة مبنية على ما حفظته.',
+  for_you_basis: 'بناءً على الأماكن المحفوظة في حسابك',
+  for_you_note:
+    'الدرجات والترتيب متطابقة للجميع. حسابك يغيّر فقط الأماكن التي تُبرز هنا.',
+  saved_here: 'محفوظة بالفعل من هذا الدليل',
 };
 
 const TRANSLATIONS: Record<string, Dict> = { en, es, fr, de, it, pt, vi, ja, ko, zh, ru, ar };

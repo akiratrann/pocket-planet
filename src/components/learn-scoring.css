@@ -1,0 +1,105 @@
+/* ---------- Scoring methodology (Learn tab) ----------
+   A table of what each signal is worth, printed from the weights the backend
+   reported for this guide. Deliberately plain: it is documentation, and the
+   moment it starts looking like a scoreboard it stops reading as one. */
+
+.score__start {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+
+.score__label {
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  margin: 12px 0 6px;
+}
+/* The "what it is not" heading. Warm, not alarming — a caveat the reader should
+   not skim past, but not an error message either. */
+.score__label--warn {
+  color: var(--accent);
+}
+
+.score__table {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.score__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 0;
+  border-top: 1px dashed var(--line);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.score__row:first-child {
+  border-top: none;
+}
+.score__sig {
+  color: var(--ink);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+/* Per-source mention weights, under the row they qualify. */
+.score__detail {
+  font-size: 10.5px;
+  color: var(--ink-soft);
+}
+.score__pts {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  font-size: 12px;
+  color: var(--ink);
+}
+.score__pts--neg {
+  color: #b4483c;
+}
+
+.score__nots {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+.score__nots li {
+  margin-bottom: 5px;
+}
+
+.score__cats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 8px;
+}
+/* Counts of the reader's OWN saved places. Neutral pill, like every other count
+   in the app — a coloured number here would read as a rating of the category. */
+.score__cat {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 5px 2px 9px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.score__catn {
+  min-width: 17px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--line);
+  color: var(--ink-soft);
+  font-size: 10.5px;
+  text-align: center;
+}

@@ -1,9 +1,11 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import './App.css';
+import './components/breadcrumb.css';
 import SearchBar from './components/SearchBar';
 import CategoryBar from './components/CategoryBar';
 import DestinationList from './components/DestinationList';
 import DestinationDetail from './components/DestinationDetail';
+import ForYouPanel from './components/ForYouPanel';
 import BuildProgress from './components/BuildProgress';
 import LanguageSelector from './components/LanguageSelector';
 import AuthWidget from './components/AuthWidget';
@@ -13,6 +15,7 @@ import { useAppStore } from './store/useAppStore';
 import { useI18n } from './i18n';
 import { CATEGORIES } from './data/categories';
 import type { CategoryId, Destination } from './types';
+import type { ScopeHint } from './components/MapView';
 
 /* ---------- Deferred code ----------
  *
@@ -79,6 +82,16 @@ function PanelFallback() {
   );
 }
 
+// Labels for the zoom-scope offer. Kept here rather than in i18n.ts, which is
+// edited elsewhere: translate() hands back the key itself when it doesn't know
+// it, so a missing key would otherwise render "scope_zoom_in" at the user.
+const SCOPE_LABELS: Record<string, string> = {
+  scope_looking_at: 'Looking at',
+  scope_explore: 'Explore',
+  scope_dismiss: 'Keep current place',
+  scope_zoom_in: 'Zoom in to explore a country or region',
+};
+
 const MIN_W = 330;
 const MAX_W = 720;
 const SHEET_SNAPS = [26, 60, 92]; // mobile bottom-sheet heights (vh)
@@ -102,7 +115,9 @@ function useIsMobile() {
 
 export default function App() {
   const query = useAppStore((s) => s.query);
+  const querySource = useAppStore((s) => s.querySource);
   const exploreTo = useAppStore((s) => s.exploreTo);
+  const setQuery = useAppStore((s) => s.setQuery);
   const frameOnLoad = useAppStore((s) => s.frameOnLoad);
   const active = useAppStore((s) => s.activeCategories);
   const selectedId = useAppStore((s) => s.selectedId);
@@ -129,6 +144,20 @@ export default function App() {
   const isMobile = useIsMobile();
   const [autoExplore, setAutoExplore] = useState(true);
   const [exploring, setExploring] = useState<string | null>(null);
+  /** What the map thinks the current viewport is asking about (see MapView). */
+  const [scopeHint, setScopeHint] = useState<ScopeHint | null>(null);
+
+  /** t() for the scope labels, with a built-in English fallback. */
+  const tScope = (key: keyof typeof SCOPE_LABELS) => {
+    const v = t(key);
+    return v === key ? SCOPE_LABELS[key] : v;
+  };
+
+  // A new place answers the offer, whichever way it was chosen — leaving
+  // "Looking at Japan?" up after the user searched for Lisbon would be stale.
+  useEffect(() => {
+    setScopeHint(null);
+  }, [query]);
 
   const [panelWidth, setPanelWidth] = useState(() =>
     clamp(Number(localStorage.getItem('pp-panel-width')) || 400, MIN_W, MAX_W),
@@ -257,6 +286,8 @@ export default function App() {
           autoExplore={autoExplore}
           onExplore={(place) => exploreTo(place)}
           onExploringChange={setExploring}
+          querySource={querySource}
+          onScopeHint={setScopeHint}
           allCategories={active.size === 0}
           frameOnLoad={frameOnLoad}
           lang={lang}
@@ -268,12 +299,48 @@ export default function App() {
       <div className="map-controls">
         <button
           className={'explore-toggle' + (autoExplore ? ' explore-toggle--on' : '')}
-          onClick={() => setAutoExplore((v) => !v)}
+          onClick={() => {
+            setAutoExplore((v) => !v);
+            setScopeHint(null);
+          }}
           title="Automatically load places as you pan and zoom the world"
         >
           🌍 {t('explore_move')}: {autoExplore ? t('on') : t('off')}
         </button>
         {exploring && autoExplore && <div className="explore-toast">{exploring}…</div>}
+        {/* The viewport has been zoomed out (or in) past the place on screen.
+            For a destination the USER chose this is an offer, not an action:
+            swapping 288 loaded places for a 25-70s country build because they
+            leaned back to see where Kyoto is would be the worse bug. One click
+            takes it; ignoring it costs nothing. Guides the app itself picked
+            while roaming re-scope on their own and never reach here. */}
+        {autoExplore && scopeHint?.kind === 'offer' && !isLoading && (
+          <div className="scope-offer" role="status">
+            <span className="scope-offer__label">
+              {tScope('scope_looking_at')} {scopeHint.name}?
+            </span>
+            <button
+              className="scope-offer__go"
+              onClick={() => {
+                setScopeHint(null);
+                exploreTo(scopeHint.name);
+              }}
+            >
+              {tScope('scope_explore')} {scopeHint.name}
+            </button>
+            <button
+              className="scope-offer__dismiss"
+              onClick={() => setScopeHint(null)}
+              aria-label={tScope('scope_dismiss')}
+              title={tScope('scope_dismiss')}
+            >
+              ✕
+            </button>
+          </div>
+        )}
+        {autoExplore && scopeHint?.kind === 'too-far' && (
+          <div className="scope-hint">{tScope('scope_zoom_in')}</div>
+        )}
       </div>
 
       <header className="topbar">
@@ -318,6 +385,25 @@ export default function App() {
         )}
 
         <div className="panel__header">
+          {/* Wikivoyage's breadcrumb answers "where is this?", which is the one
+              thing it is actually good for — and clicking a region name to
+              search it is the behaviour asked for on place names generally.
+              Kept out of the <h1> so the heading reads as just the place. */}
+          {guide?.parent && guide.parent !== guide.title && (
+            <div className="crumb">
+              <button
+                type="button"
+                className="crumb__link"
+                onClick={() => setQuery(guide.parent!)}
+                title={guide.parent}
+              >
+                {guide.parent}
+              </button>
+              <span className="crumb__sep" aria-hidden="true">
+                ›
+              </span>
+            </div>
+          )}
           <div className="panel__titlebar">
             <h1 className="panel__place">
               <span className="panel__place-name">{guide ? guide.title : query}</span>
@@ -410,6 +496,11 @@ export default function App() {
                           <div className="panel__sticky">
                             <CategoryBar counts={counts} />
                           </div>
+                          {/* Renders nothing for a signed-out reader, so the
+                              list looks exactly as it always did unless there
+                              is a real account with real saved places behind
+                              it. */}
+                          <ForYouPanel location={guide.title} />
                           <DestinationList
                             destinations={visibleDestinations}
                             location={guide.title}

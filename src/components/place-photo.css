@@ -113,3 +113,84 @@
     transition: none;
   }
 }
+
+/* ==========================================================================
+   EMPTY STATE, RETUNED
+   ==========================================================================
+   The tile was already built around absence rather than treating it as a
+   failure — the structure above is right. What was wrong was the finish:
+
+     - the wash was 8% of the raw CATEGORY colour, and "Sights" is a hot
+       orange-red, so every photo-less sight came out pink. Pink reads as an
+       error tint, not as a neutral;
+     - a 26px full-colour emoji at 42% opacity sits at roughly the visual
+       weight of a broken-image glyph, which is precisely the thing it was
+       there to avoid;
+     - a 1px border drew a frame around nothing;
+     - the diagonal sheen was hard-coded white, i.e. it assumed a light theme.
+
+   Since most places in an assembled guide legitimately have no photo, this
+   state is not an edge case — it is the majority of the list, and it has to
+   look composed. The fix follows the rule that makes placeholder sets read as
+   a system: hold LIGHTNESS and SATURATION fixed and let only the HUE move.
+   Every tile then has identical visual weight and only whispers which
+   category it belongs to.
+   ========================================================================== */
+
+.pphoto {
+  /* Neutral base first, hue second, and the hue is knocked most of the way
+     toward grey BEFORE it is applied. That two-stage mix is what holds every
+     tile at the same lightness and saturation so only the hue differs — the
+     difference between a set of siblings and a rainbow. Applying the raw
+     category colour is what made photo-less sights come out pink: "Sights" is
+     a hot orange-red, and even 6% of it reads as a tint at banner size.
+     --surface-2 already differs per theme, so this covers light and dark. */
+  background: var(--surface-2);
+  background: color-mix(
+    in srgb,
+    color-mix(in srgb, var(--pp-tint, #8a8178) 30%, var(--ink-faint)) 10%,
+    var(--surface-2)
+  );
+  /* No border. A frame around nothing announces the nothing. */
+  border: none;
+}
+
+/* A designed surface rather than a flat fill: 45° stripes at ~3% contrast.
+   Below the threshold where it reads as texture, above the one where it reads
+   as a blank rectangle. */
+.pphoto__tile {
+  background-image: repeating-linear-gradient(
+    45deg,
+    color-mix(in srgb, var(--ink) 3%, transparent) 0 1px,
+    transparent 1px 7px
+  );
+  gap: 5px;
+}
+
+/* Desaturated and quiet. The glyph is a hint at what the place is; the title
+   next to it is the content. Deliberately low contrast so it reads as part of
+   the surface instead of competing with the text. */
+.pphoto__icon {
+  opacity: 0.3;
+  filter: grayscale(1) contrast(0.85);
+}
+.pphoto--card .pphoto__icon {
+  font-size: 20px;
+}
+.pphoto--hero .pphoto__icon {
+  font-size: 30px;
+}
+
+/* The caption is the one part of the empty state that is genuinely text, so it
+   clears 4.5:1 against the tile rather than sitting at the icon's deliberately
+   low, textural contrast. */
+.pphoto__label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--ink-muted);
+  opacity: 1;
+}
+
+/* Absence is a settled state, so it never animates. Only a photo ARRIVING
+   animates, and that transition already lives on .pphoto--ready above. */

@@ -1,0 +1,118 @@
+/* ---------- "For you" shortlist ----------
+   Sits above the ranked list on Explore, for signed-in readers only. Styled as
+   a quiet card rather than a hero: it is a shortcut into the same list that
+   follows it, not a competing ranking, and it must not read as "the real
+   answer" with the guide demoted to small print underneath. */
+
+.foryou {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 11px 13px 12px;
+  margin: 0 0 12px;
+  background: var(--panel-bg);
+}
+
+.foryou__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 10px;
+  margin-bottom: 8px;
+}
+.foryou__title {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+/* The provenance line. Small, but never hidden: it is what stops "For you"
+   sounding like the app knows something about the reader that it doesn't. */
+.foryou__basis {
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+.foryou__empty {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-soft);
+}
+
+.foryou__picks {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.foryou__btn {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: none;
+  font: inherit;
+  text-align: start;
+  color: var(--ink);
+  cursor: pointer;
+  transition: border-color 0.15s ease, transform 0.12s ease;
+}
+.foryou__btn:hover {
+  border-color: var(--cat-color, var(--accent));
+  transform: translateY(-1px);
+}
+.foryou__btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.foryou__icon {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--cat-color, #888) 18%, transparent);
+  font-size: 14px;
+}
+
+.foryou__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.foryou__name {
+  font-size: 12.5px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.foryou__why {
+  font-size: 10.5px;
+  color: var(--ink-soft);
+}
+
+.foryou__rank {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+
+.foryou__note {
+  margin: 8px 0 0;
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--ink-soft);
+}

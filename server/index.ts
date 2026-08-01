@@ -20,6 +20,7 @@ import compress from '@fastify/compress';
 import rateLimit from '@fastify/rate-limit';
 import cron from 'node-cron';
 import { assembleGuide } from './assemble.ts';
+import { personalizeGuide } from './personalize.ts';
 import { store } from './store.ts';
 import { applyFeedback, type Feedback, type FeedbackKind } from '../src/core/learning.ts';
 import { ingestUrl, ingestLocationAuto, ingestAllTracked } from './pipeline/ingest.ts';
@@ -193,6 +194,26 @@ app.get('/api/capabilities', async (req) => {
     canFeedback: !!user,
     canTrain: !!user && isAdmin(user),
   };
+});
+
+// A signed-in caller's own view of one guide: a shortlist drawn from the places
+// they have saved. Requires an account by nature — there is nothing to
+// personalize from without one — and reads only that account's own data.
+app.get<{ Querystring: { q?: string; lang?: string } }>('/api/personal', async (req, reply) => {
+  const user = await requireUser(req, reply);
+  if (!user) return reply;
+  const q = (req.query.q ?? '').trim();
+  if (!q) return reply.code(400).send({ error: 'Missing query parameter q' });
+  const lang = /^[a-z]{2,3}$/.test(req.query.lang ?? '') ? req.query.lang! : 'en';
+  try {
+    // Same cache key as /api/guide, so this reuses the guide the reader is
+    // already looking at instead of assembling a second copy of it.
+    const { value } = await cachedGuide(`${q.toLowerCase()}::${lang}`, () => assembleGuide(q, lang));
+    return personalizeGuide(user, value);
+  } catch (err) {
+    req.log.error(err);
+    return reply.code(502).send({ error: (err as Error).message });
+  }
 });
 
 // --- SSRF hardening for /api/ingest ----------------------------------------

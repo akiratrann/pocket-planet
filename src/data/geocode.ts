@@ -15,36 +15,82 @@ export interface GeoResult {
   bbox?: [number, number, number, number]; // [minLon, minLat, maxLon, maxLat]
 }
 
-export interface ReverseResult {
-  /** Best place name for the current zoom scope (city / region / country). */
-  name: string;
-  scope: 'city' | 'region' | 'country';
-}
+/** The administrative level a viewport is asking about. */
+export type MapScope = 'city' | 'region' | 'country';
 
-function nominatimZoom(mapZoom: number): number {
-  if (mapZoom < 4) return 3; // country
-  if (mapZoom < 6) return 5; // state
-  if (mapZoom < 9) return 8; // county / region
-  if (mapZoom < 12) return 10; // city
-  return 13; // suburb
+/**
+ * `'world'` is deliberately NOT a `MapScope`: at continental spans there is no
+ * honest single answer ("Asia" is not a guide), so callers are expected to do
+ * nothing rather than pick something.
+ */
+export type ViewScope = MapScope | 'world';
+
+export interface ReverseResult {
+  /** Best place name for the requested scope (city / region / country). */
+  name: string;
+  scope: MapScope;
 }
 
 /**
- * Reverse-geocode the map center into a place name whose *scope follows the zoom*:
- * zoomed out → a country, mid → a region, zoomed in → a city/town. This is what
- * lets you roam the whole world and have the right guide load for wherever you are.
+ * How wide the viewport is on the ground, in km → what the user means by it.
+ *
+ * Scope is derived from the SPAN rather than from the raw zoom number because
+ * zoom alone is a lie: the same zoom shows twice as much world on a tall desktop
+ * window as on a phone, and a degree of longitude is 111 km at the equator and
+ * 50 km in Hokkaido. Span is what the eye actually sees.
+ *
+ * The bands are sized off real administrative extents AND off what this app's
+ * own framing produces, which is the tighter constraint. Fitting the camera to a
+ * city guide's bbox with padding lands at ~60-140 km depending on the city and
+ * the window, so the `city` band has to clear that comfortably — measured at 60
+ * km for Kyoto on one window size and 62 km on another, and a boundary drawn
+ * between those two had the app re-scope a city guide to its prefecture the
+ * moment it finished framing it, buying a guide build to answer a question
+ * nobody asked. A prefecture/state runs to a few hundred km, and a country to a
+ * few thousand: Japan end-to-end plus its neighbours is ~3,600 km, which is why
+ * `country` reaches as far as it does — that is the exact framing the user
+ * called "I mean Japan".
+ */
+export function scopeForSpanKm(spanKm: number): ViewScope {
+  if (spanKm <= 120) return 'city';
+  if (spanKm <= 500) return 'region';
+  if (spanKm <= 4500) return 'country';
+  return 'world';
+}
+
+/** Nominatim's `zoom` parameter for each scope — it maps onto OSM admin levels. */
+const SCOPE_ZOOM: Record<MapScope, number> = { city: 10, region: 5, country: 3 };
+
+/**
+ * Reverse-geocode a point at a chosen administrative scope: ask for a country
+ * and you get "Japan" even though the point is in Kyoto. This is what lets the
+ * map answer "what am I looking at?" with the level the viewport is framed at
+ * rather than always with the most specific place under the crosshair.
+ *
+ * Never resolves MORE specifically than asked (a country request never returns a
+ * city), but will fall back UP when the point has nothing at that level — mid-
+ * ocean or in a desert there may be no city, and a region is a better answer
+ * than none.
  */
 export async function reverseGeocode(
   lat: number,
   lon: number,
-  mapZoom: number,
+  scope: MapScope,
   lang = 'en',
 ): Promise<ReverseResult | null> {
-  const nz = nominatimZoom(mapZoom);
+  const cacheKey = `${scope}:${lang}:${lat.toFixed(2)}:${lon.toFixed(2)}`;
+  const hit = reverseCache.get(cacheKey);
+  if (hit !== undefined) return hit;
+
   const url =
     'https://nominatim.openstreetmap.org/reverse?format=jsonv2&addressdetails=1' +
-    `&lat=${lat}&lon=${lon}&zoom=${nz}&accept-language=${encodeURIComponent(lang)}`;
+    `&lat=${lat}&lon=${lon}&zoom=${SCOPE_ZOOM[scope]}` +
+    `&accept-language=${encodeURIComponent(lang)}`;
   try {
+    // Shares the 1 req/s gate with the search box: this now fires whenever the
+    // map settles, and two independent callers ignoring the limit is how you get
+    // the whole app 429'd.
+    await throttleNominatim();
     const res = await fetch(url, { headers: GEO_HEADERS });
     if (!res.ok) return null;
     const data = (await res.json()) as {
@@ -53,22 +99,61 @@ export async function reverseGeocode(
     };
     const a = data.address ?? {};
     const city = a.city ?? a.town ?? a.village ?? a.municipality ?? a.suburb;
+    // `province` covers Japan's prefectures, which Nominatim reports there
+    // rather than under `state`.
     const region = a.state ?? a.region ?? a.province ?? a.county;
     const country = a.country;
 
-    if (nz <= 3 && country) return { name: country, scope: 'country' };
-    if (nz <= 5) {
-      if (region) return { name: region, scope: 'region' };
-      if (country) return { name: country, scope: 'country' };
+    let out: ReverseResult | null = null;
+    if (scope === 'country') {
+      out = country ? { name: country, scope: 'country' } : null;
+    } else if (scope === 'region') {
+      if (region) out = { name: region, scope: 'region' };
+      else if (country) out = { name: country, scope: 'country' };
+    } else {
+      if (city) out = { name: city, scope: 'city' };
+      else if (region) out = { name: region, scope: 'region' };
+      else if (country) out = { name: country, scope: 'country' };
+      else if (data.name) out = { name: data.name, scope: 'city' };
     }
-    // City-ish scopes: prefer the most specific inhabited place.
-    if (city) return { name: city, scope: 'city' };
-    if (region) return { name: region, scope: 'region' };
-    if (country) return { name: country, scope: 'country' };
-    return data.name ? { name: data.name, scope: 'city' } : null;
+
+    if (reverseCache.size > 200) reverseCache.clear();
+    reverseCache.set(cacheKey, out);
+    return out;
   } catch {
     return null;
   }
+}
+
+/**
+ * Nudging the map by a few pixels must not re-ask Nominatim the same question,
+ * so answers are cached per rounded point + scope.
+ */
+const reverseCache = new Map<string, ReverseResult | null>();
+
+/**
+ * Do two place names refer to the same place? Compared as whole words after
+ * case/accent folding, so "Kyoto Prefecture" (Nominatim) matches "Kyoto
+ * (prefecture)" (Wikivoyage) and a bare "Kyoto" matches both.
+ *
+ * The shorter name has to be a token PREFIX of the longer one, not merely
+ * contained in it — otherwise "York" would match "New York" and zooming into
+ * Manhattan would offer to leave for Yorkshire.
+ */
+export function isSamePlace(a: string, b: string): boolean {
+  const x = placeTokens(a);
+  const y = placeTokens(b);
+  if (!x.length || !y.length) return false;
+  const [short, long] = x.length <= y.length ? [x, y] : [y, x];
+  return short.every((tok, i) => long[i] === tok);
+}
+
+function placeTokens(s: string): string[] {
+  return fold(s)
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
 }
 
 /** Reverse-geocode to an ISO 3166-1 alpha-2 country code (lowercase), e.g. "jp". */
