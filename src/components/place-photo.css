@@ -1,8 +1,9 @@
-/* ---------- Place photo slot ---------- */
-/* Photo coverage is partial and always will be: a guide is assembled from
-   sources that simply don't picture every listing. So the slot is built around
-   the ABSENCE of a photo rather than treating it as a failure — a category tile
-   is always painted, and the photo (when there is one) sits on top of it.
+/* ---------- Place photo slot ----------
+   Photo coverage is partial and always will be: a guide is assembled from
+   sources that simply don't picture every listing. Measured on a built Kyoto
+   guide, 123 of 248 places have a photo — 50%. So the slot is built around the
+   ABSENCE of a photo rather than treating it as a failure: a tile is always
+   painted, and the photo (when there is one) sits on top of it.
 
    That single structure buys three things at once:
      - no photo        -> a deliberate tile, not a broken-image glyph
@@ -10,25 +11,43 @@
                           drops the <img> and nothing moves
      - slow network    -> the tile occupies the exact final box from first
                           paint, so a late photo can never shift the layout
-   The tile is a heavily diluted wash of the category colour, not the solid fill
-   used in the itinerary rail: a list is mostly real photographs and the
-   placeholders have to sit quietly beside them. */
+
+   THE THREE STATES ARE DISTINGUISHABLE IN CSS ALONE, which is what lets the
+   empty state be styled differently from the loading state without any extra
+   props:
+     .pphoto:not(:has(.pphoto__img))  -> there is no photo and never will be
+     .pphoto:has(.pphoto__img)        -> a photo exists; box must not move
+     .pphoto:has(.pphoto__img--in)    -> it has decoded; reveal it
+   ------------------------------------------------------------------------- */
 
 .pphoto {
   position: relative;
   overflow: hidden;
   flex-shrink: 0;
-  /* Flat fallback first, for engines without color-mix(). */
-  background: #f4f1ec;
-  background: color-mix(in srgb, var(--pp-tint, #8a8178) 8%, var(--panel-bg));
-  border: 1px solid var(--line);
-  border-color: color-mix(in srgb, var(--pp-tint, #8a8178) 18%, var(--line));
+
+  /* Neutral base first, hue second, and the hue is knocked most of the way
+     toward grey BEFORE it is applied. That two-stage mix holds every tile at
+     the same lightness and saturation so only the HUE moves between
+     categories — the difference between a set of siblings and a rainbow.
+     Applying the raw category colour is what made photo-less sights come out
+     pink: "Sights" is a hot orange-red (#e4572e), and even 8% of it reads as a
+     tint at banner size. --surface-2 differs per theme, so this covers both. */
+  background: var(--surface-2); /* flat fallback for engines without color-mix */
+  background: color-mix(
+    in srgb,
+    color-mix(in srgb, var(--pp-tint, #8a8178) 28%, var(--ink-faint)) 10%,
+    var(--surface-2)
+  );
+
+  /* No border. A frame drawn around nothing announces the nothing. The tile
+     already differs from the card behind it by surface lightness alone. */
+  border: none;
 }
 
 .pphoto--card {
   width: 78px;
   height: 78px;
-  border-radius: 10px;
+  border-radius: var(--r-image, 10px);
   /* The card's full-bleed hit layer is z-index 1 and sits behind everything the
      user actually looks at; the slot has to clear it and stay click-through so
      the whole card still selects the place. */
@@ -43,45 +62,109 @@
   margin-bottom: 8px;
 }
 
-/* The tile. Sits under the photo, so it is also what shows while one loads. */
+/* ---------- The tile ----------
+   Sits under the photo, so it is also what shows while one loads.
+
+   What made the old tile read as BROKEN rather than empty was not the colour,
+   it was the composition: a small, low-contrast, centred glyph on a flat fill
+   is the exact signature every browser uses for a failed image. Worse, the
+   `sights` category — the largest one in most guides — has a CAMERA for its
+   icon, so the commonest photo-less card in the app was rendering a grey
+   camera in the middle of a grey box. That is indistinguishable from an error.
+
+   The fix is compositional, not chromatic:
+     - the graphic is a soft contour motif that FILLS the tile, so the tile
+       reads as a designed surface rather than as a container waiting for
+       something;
+     - the category glyph goes entirely (see .pphoto__icon below) — there is no
+       size at which an emoji on an empty tile stops reading as a status icon;
+     - nothing is centred, because centred-and-small is the failure signature.
+       The only mark with a position is the caption, and it sits on the card's
+       own padding grid, which is what makes it read as composed.
+   ------------------------------------------------------------------------- */
 .pphoto__tile {
   position: absolute;
   inset: 0;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  /* A faint diagonal sheen keeps a large empty hero from reading as a dead
-     grey rectangle without adding any colour of its own. */
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0));
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 2px;
+  padding: 8px 10px;
+  overflow: hidden;
+  transition: opacity 0.18s ease;
 }
 
+/* Concentric contour rings, sprung from just off the bottom-left corner. Reads
+   as a topographic/map motif, which is the one decorative language this app has
+   already earned the right to use. Held at ~4% ink: above the threshold where
+   it reads as texture, below the one where it competes with a real photo in the
+   next card down. */
+.pphoto__tile::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    /* a soft light source, so the tile has a direction and isn't a dead flat */
+    radial-gradient(
+      120% 100% at 12% 0%,
+      color-mix(in srgb, var(--surface-0) 55%, transparent),
+      transparent 70%
+    ),
+    repeating-radial-gradient(
+      circle at 18% 118%,
+      color-mix(in srgb, var(--ink) 4.5%, transparent) 0 1px,
+      transparent 1px 13px
+    );
+}
+
+/* NO CATEGORY GLYPH ON THE EMPTY TILE.
+   PlacePhoto still renders `.pphoto__icon` (the component is shared and is not
+   this file's to change), so it is hidden here rather than removed.
+
+   Enlarging the glyph into a cropped corner watermark was tried and measured,
+   and it fails on the one card that matters most. The category emoji comes from
+   the taxonomy in data/categories.ts, and `sights` — the largest category in a
+   typical guide — is 📸, A CAMERA. On the 78px list thumbnail an emoji big
+   enough to read as ornament (44px) covers over half the tile, so the commonest
+   photo-less card in the app rendered a large grey camera with a yellow flash
+   burst on a flat grey square. That is not "obviously decorative"; it is the
+   universal glyph for a picture that failed to load, which is precisely what
+   this tile exists to avoid. On the 96px detail hero it was worse, not better:
+   big enough to be unmistakable, cropped enough to look like a mistake.
+
+   Shrinking it back only returns to the old failure (a small, low-contrast,
+   centred glyph is the browser's own broken-image signature), so the glyph has
+   no size at which it helps. It goes. The tile is carried by the contour motif
+   above, which cannot be mistaken for a status icon at any size, and by the
+   caption below; the category itself is still stated as text on the card's meta
+   row, in the section heading above it, and on the detail view's own pill. */
 .pphoto__icon {
-  line-height: 1;
-  /* Desaturated and half-transparent: the icon is a hint at what the place is,
-     never a graphic that pulls the eye away from the real photo next to it. */
-  opacity: 0.42;
-  filter: saturate(0.75);
+  display: none;
 }
 
-.pphoto--card .pphoto__icon {
-  font-size: 26px;
-}
+/* The caption is the only text in the empty state and now the only mark in it
+   with a definite position, so it clears 4.5:1 against the tile rather than
+   sitting at the contour motif's deliberately low, textural contrast.
+   Bottom-left, on the baseline grid of the card's own padding — it reads as a
+   caption, which is a composed thing, rather than as an error message, which is
+   a centred thing.
 
-.pphoto--hero .pphoto__icon {
-  font-size: 40px;
-}
-
+   --ink-muted is the app's "smallest text that still clears 4.5:1", but that is
+   measured against --surface-0. This text sits on the TILE, which is a step
+   darker, and there it measures only 4.26:1 — so it takes the next ink down.
+   Measured on the tile: 5.69:1 light, 6.25:1 dark. */
 .pphoto__label {
-  font-size: 12px;
+  position: relative; /* above ::before */
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.01em;
+  line-height: 1.2;
   color: var(--ink-soft);
-  color: color-mix(in srgb, var(--pp-tint, #8a8178) 35%, var(--ink-soft));
-  opacity: 0.85;
+  opacity: 1;
 }
 
+/* ---------- The photo ---------- */
 .pphoto__img {
   position: absolute;
   inset: 0;
@@ -90,107 +173,45 @@
   object-fit: cover;
   display: block;
   /* Arrives as a settle, not a flash. Kept short, and the tile fades out on the
-     same curve, so the icon is never visible ghosting through the photo. */
+     same curve, so its texture is never visible ghosting through the photo. */
   opacity: 0;
   transition: opacity 0.18s ease;
 }
 
-.pphoto--ready .pphoto__img {
+/* THE REVEAL. This previously keyed off a `.pphoto--ready` class on the
+   CONTAINER, but PlacePhoto has never set one — it flags the IMG with
+   `.pphoto__img--in` once it decodes. The two never met, so every photo in the
+   app sat at opacity 0 forever and all 123 photos in a Kyoto guide rendered as
+   placeholder tiles. That single dead selector is most of why the list looked
+   like a debug view. */
+.pphoto__img--in {
   opacity: 1;
 }
-
-.pphoto__tile {
-  transition: opacity 0.18s ease;
-}
-
-.pphoto--ready .pphoto__tile {
+.pphoto:has(.pphoto__img--in) .pphoto__tile {
   opacity: 0;
 }
 
+/* ---------- Genuinely photo-less, as opposed to still loading ----------
+   `:not(:has(.pphoto__img))` means PlacePhoto rendered no <img> at all: either
+   there is no source or it already errored out. Nothing can arrive later, so
+   the box is free to change shape without any risk of a late photo shifting the
+   layout — the guarantee at the top of this file still holds, because it only
+   ever had to hold for slots that HAVE a photo coming.
+
+   A headline card's photo is a full-width 16:9 banner. Empty, that is a large
+   rectangle of nothing sitting above the fold, and no amount of texture makes
+   a void that size look intentional. So an empty headline banner is simply
+   shorter — a calm band that carries the rank chip, the save button and the
+   caption, and then gets out of the way of the text that is actually the
+   content. */
+.dcard--hero .pphoto--card:not(:has(.pphoto__img)) {
+  aspect-ratio: 3 / 1;
+}
+
+/* ---------- Motion ---------- */
 @media (prefers-reduced-motion: reduce) {
   .pphoto__img,
   .pphoto__tile {
     transition: none;
   }
 }
-
-/* ==========================================================================
-   EMPTY STATE, RETUNED
-   ==========================================================================
-   The tile was already built around absence rather than treating it as a
-   failure — the structure above is right. What was wrong was the finish:
-
-     - the wash was 8% of the raw CATEGORY colour, and "Sights" is a hot
-       orange-red, so every photo-less sight came out pink. Pink reads as an
-       error tint, not as a neutral;
-     - a 26px full-colour emoji at 42% opacity sits at roughly the visual
-       weight of a broken-image glyph, which is precisely the thing it was
-       there to avoid;
-     - a 1px border drew a frame around nothing;
-     - the diagonal sheen was hard-coded white, i.e. it assumed a light theme.
-
-   Since most places in an assembled guide legitimately have no photo, this
-   state is not an edge case — it is the majority of the list, and it has to
-   look composed. The fix follows the rule that makes placeholder sets read as
-   a system: hold LIGHTNESS and SATURATION fixed and let only the HUE move.
-   Every tile then has identical visual weight and only whispers which
-   category it belongs to.
-   ========================================================================== */
-
-.pphoto {
-  /* Neutral base first, hue second, and the hue is knocked most of the way
-     toward grey BEFORE it is applied. That two-stage mix is what holds every
-     tile at the same lightness and saturation so only the hue differs — the
-     difference between a set of siblings and a rainbow. Applying the raw
-     category colour is what made photo-less sights come out pink: "Sights" is
-     a hot orange-red, and even 6% of it reads as a tint at banner size.
-     --surface-2 already differs per theme, so this covers light and dark. */
-  background: var(--surface-2);
-  background: color-mix(
-    in srgb,
-    color-mix(in srgb, var(--pp-tint, #8a8178) 30%, var(--ink-faint)) 10%,
-    var(--surface-2)
-  );
-  /* No border. A frame around nothing announces the nothing. */
-  border: none;
-}
-
-/* A designed surface rather than a flat fill: 45° stripes at ~3% contrast.
-   Below the threshold where it reads as texture, above the one where it reads
-   as a blank rectangle. */
-.pphoto__tile {
-  background-image: repeating-linear-gradient(
-    45deg,
-    color-mix(in srgb, var(--ink) 3%, transparent) 0 1px,
-    transparent 1px 7px
-  );
-  gap: 5px;
-}
-
-/* Desaturated and quiet. The glyph is a hint at what the place is; the title
-   next to it is the content. Deliberately low contrast so it reads as part of
-   the surface instead of competing with the text. */
-.pphoto__icon {
-  opacity: 0.3;
-  filter: grayscale(1) contrast(0.85);
-}
-.pphoto--card .pphoto__icon {
-  font-size: 20px;
-}
-.pphoto--hero .pphoto__icon {
-  font-size: 30px;
-}
-
-/* The caption is the one part of the empty state that is genuinely text, so it
-   clears 4.5:1 against the tile rather than sitting at the icon's deliberately
-   low, textural contrast. */
-.pphoto__label {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--ink-muted);
-  opacity: 1;
-}
-
-/* Absence is a settled state, so it never animates. Only a photo ARRIVING
-   animates, and that transition already lives on .pphoto--ready above. */

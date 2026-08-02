@@ -195,9 +195,16 @@
   background: rgba(255, 255, 255, 0.28);
   border-color: rgba(255, 255, 255, 0.9);
 }
-.chip__cb:focus-visible + .chip__box {
+/* The native checkbox is visually hidden, so focus has to be drawn somewhere
+   else. It goes around the WHOLE chip, not around the 15px box inside it: the
+   chip is the control the reader is operating, and once the filters became a
+   scrolling rail (see CategoryBar) these chips are the only keyboard path
+   through them — a ring on a 15px square inside a 200px target is easy to lose
+   and does not show which chip focus scrolled the rail to. */
+.chip:has(.chip__cb:focus-visible) {
   outline: 2px solid var(--accent, #2b7de9);
   outline-offset: 2px;
+  border-radius: var(--r-badge, 7px);
 }
 
 /* "What travellers say" — grounded opinion summary. */
@@ -2238,61 +2245,11 @@ a.opinions__src:hover {
   color: #fff;
 }
 
-/* ---------- Collapsible category filters ---------- */
-.catwrap__bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.catwrap__toggle {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  flex: 1 1 auto;
-  min-width: 0;
-  padding: 7px 10px;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 650;
-  color: var(--ink);
-  text-align: left;
-  cursor: pointer;
-  background: var(--surface-0);
-  border: 1px solid var(--line);
-  border-radius: 9px;
-}
-.catwrap__toggle:hover {
-  border-color: var(--accent);
-}
-.catwrap__chevron {
-  flex: 0 0 auto;
-  font-size: 11px;
-  color: var(--ink-soft);
-}
-/* The active filters, named — collapsing the list must not hide what's on. */
-.catwrap__summary {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  font-weight: 400;
-  color: var(--ink-soft);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.catwrap__clear {
-  flex: 0 0 auto;
-  padding: 7px 10px;
-  font: inherit;
-  font-size: 12.5px;
-  color: var(--ink-soft);
-  cursor: pointer;
-  background: none;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-}
-.catwrap--open .catbar {
-  margin-top: 9px;
-}
+/* The `.catwrap*` block that lived here styled the "Filters" disclosure — a
+   toggle, a chevron, a comma-joined summary of the active filters and a Clear
+   button. CategoryBar no longer renders any of it: the filters are one always-
+   visible scrolling rail, so there is nothing to disclose and the "All" chip is
+   the clear control. See the .catbar block further down. */
 
 /* Freshness stamp on live routing results. */
 .travel__fresh {
@@ -3148,26 +3105,77 @@ a.opinions__src:hover {
   overflow-y: hidden;
   gap: var(--s-6);
   /* Bleed to the panel edges so chips scroll under the edge instead of
-     stopping short of it, and keep the first/last chip off the very edge. */
+     stopping short of it, and keep the first/last chip off the very edge.
+     6px of vertical padding, not 2px: the focus ring is a 2px outline at a 2px
+     offset, so a chip needs 4px of clearance inside the rail or `contain`
+     below crops the ring on the chip the keyboard user just landed on. */
   margin-inline: -14px;
-  padding: 2px 14px;
+  padding: 6px 14px;
+  /* Stops the rail's off-screen chips from inflating the PANEL's scrollWidth.
+     `overflow-x: auto` alone does not: Chromium still counts a descendant
+     scroll container's content as layout overflow of its ancestors, so the
+     whole destination list became horizontally scrollable by ~1050px — a
+     second scrollbar on the list, which is exactly what this layout must not
+     have. `contain: paint` scopes the overflow to the rail itself; measured
+     after: panel scrollWidth == clientWidth, and the rail still scrolls. */
+  contain: paint;
   scrollbar-width: none;
-  scroll-snap-type: x proximity;
-  /* Fade the trailing edge so a clipped row visibly says "there is more".
-     Right edge only: a leading fade would dim the first chip while the strip
-     is still scrolled to the start, which is where it sits most of the time. */
+  /* NO SCROLL SNAPPING. `scroll-snap-type: x proximity` plus a `start` align on
+     every chip was here, and it silently broke the keyboard path: snapping runs
+     after any programmatic scroll, so it re-aligned some OTHER chip's leading
+     edge to the scrollport and dragged the chip that had just been focused back
+     out of view. Measured, tabbing to "Museums & Culture" left 50px of it —
+     including the right-hand side of its focus ring — past the fold; the same
+     for "Nature & Outdoors" and "Activities & Tours". With snapping off every
+     chip lands fully inside the rail. This is a filter row, not a carousel:
+     there is no page of chips worth snapping to, and it cost keyboard access. */
+
+  /* Where a revealed chip parks. The end inset is bigger than the start's
+     because it also has to clear the trailing fade below: focusing a chip
+     scrolls it just inside the scrollport, and at 14px that put the chip — and
+     the right-hand side of its focus ring — under the gradient. 40px covers
+     36px of fade plus the 4px the ring needs. */
+  scroll-padding-inline: 14px 40px;
+
+  /* Fade a clipped edge so the row visibly says "there is more that way".
+     Both fades are CONDITIONAL, driven by data attributes CategoryBar sets from
+     the rail's own scroll position. A fade that is always on is a lie in two
+     directions: at the end of the scroll it dimmed the last chip — its count,
+     its border and, when it was the focused chip, its focus ring — while
+     promising content that does not exist; and a permanently-lit leading fade
+     would dim the first chip in the state the rail is in most of the time. Tied
+     to the scroll position, each edge says only what is true. */
+  --fade-start: 0px;
+  --fade-end: 0px;
   -webkit-mask-image: linear-gradient(
     to right,
-    #000 calc(100% - 20px),
+    transparent 0,
+    #000 var(--fade-start),
+    #000 calc(100% - var(--fade-end)),
     transparent 100%
   );
-  mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent 100%);
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 var(--fade-start),
+    #000 calc(100% - var(--fade-end)),
+    transparent 100%
+  );
+}
+/* 24px leading / 36px trailing, not a matched pair: the trailing fade has to
+   cover the gap between the last chip and the panel edge as well as the chip
+   itself, and at 20px it finished inside the chip's own border, which read as a
+   hard cut rather than as continuation. */
+.catbar[data-overflow-start='on'] {
+  --fade-start: 24px;
+}
+.catbar[data-overflow-end='on'] {
+  --fade-end: 36px;
 }
 .catbar::-webkit-scrollbar {
   display: none;
 }
 .catbar > * {
-  scroll-snap-align: start;
   flex: 0 0 auto;
 }
 
@@ -3204,19 +3212,6 @@ a.opinions__src:hover {
   opacity: 0.6;
   font-weight: 600;
 }
-.catwrap__toggle,
-.catwrap__clear {
-  border-radius: var(--r-badge);
-  border-color: var(--hairline-strong);
-  background: var(--surface-0);
-  font-size: 12.5px;
-}
-.catwrap__toggle:hover,
-.catwrap__clear:hover {
-  border-color: var(--ink-faint);
-  background: var(--surface-2);
-}
-
 /* ---------- Section heading ----------
    An uppercase micro-label: small, tracked out, and grey. It is a divider,
    not a headline, so it must not compete with the place names under it. The
@@ -3389,7 +3384,11 @@ a.opinions__src:hover {
   display: inline-grid;
   gap: 3px;
   flex-shrink: 0;
-  min-width: 34px;
+  /* The fill bar is the badge's position channel, and a position judgment needs
+     enough run to be read as a position. Below ~32px of track the bar stops
+     being a reading on a scale and becomes a dash, so the badge is sized from
+     the bar outwards: 44px box - 10px padding = 34px of track. */
+  min-width: 44px;
   padding: 3px 5px 4px;
   border: 1px solid color-mix(in srgb, var(--band) 26%, transparent);
   border-radius: var(--r-badge);

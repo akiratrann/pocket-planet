@@ -39,7 +39,7 @@ const COMMONS_CAP = 80;
  * them — a photo cached when a bare surname was enough to match must not
  * outlive the rule that let it in. Entries from older generations are pruned.
  */
-const RULES = 'v4';
+const RULES = 'v5';
 /** Parallelism for the per-category Commons calls (kept low to avoid throttling). */
 const CONCURRENCY = 4;
 
@@ -48,8 +48,18 @@ const USER_AGENT = 'PocketPlanet/1.0 (https://github.com/akiratrann/pocket-plane
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Filenames that are almost never a real photo of the place. */
-const JUNK_FILE = /(\.svg|\.pdf|\.ogg|\.oga|\.ogv|\.webm|\.mid|\.wav)$|\.svg\.|locator|location map|\bmap\b|\bplan\b|logo|icon|flag of|coat of arms|\bseal\b|blason|wappen|diagram|floorplan|panorama.*sphere|qr[ _]code/i;
+/**
+ * Filenames that are almost never a real photo of the place.
+ *
+ * The second group is artwork rather than photography. A depiction is not a
+ * photograph of the place as it stands: Lisbon's "Peixe em Lisboa" (a food
+ * festival) was illustrated with a 19th-century *lithograph* of a fishwife
+ * selling fish, which matches the name word-for-word and shows nothing a
+ * traveller would recognise. Reproductions of paintings, engravings and old
+ * postcards fail the same way, so they are refused by name.
+ */
+const JUNK_FILE =
+  /(\.svg|\.pdf|\.ogg|\.oga|\.ogv|\.webm|\.mid|\.wav)$|\.svg\.|locator|location map|\bmap\b|\bplan\b|logo|icon|flag of|coat of arms|\bseal\b|blason|wappen|diagram|floorplan|panorama.*sphere|qr[ _]code|litho(graph|grafia)?|lithografia|gravura|engraving|etching|woodcut|ukiyo|\bpainting\b|\bdrawing\b|illustration|postcard|\bposter\b|\bsketch\b/i;
 
 function commonsThumb(file: string): string {
   const clean = file.replace(/^(File|Image):/i, '').trim();
@@ -90,6 +100,43 @@ const GENERIC_WORDS = new Set([
 ]);
 
 /**
+ * Words that name a KIND of place rather than a place.
+ *
+ * Deliberately a superset of GENERIC_WORDS rather than an extension of it:
+ * GENERIC_WORDS decides which tokens a match must *prove*, so adding to it
+ * loosens every name check in the file ("Hanoi Train Street" would stop having
+ * to prove "street"). This set is only ever read to ask a different question —
+ * whether a name identifies anything at all — so it can be as broad as it needs
+ * to be without weakening a single match.
+ */
+const KIND_WORDS = new Set([
+  ...GENERIC_WORDS,
+  'market', 'markets', 'bazaar', 'souk', 'souq', 'night', 'morning', 'evening',
+  'central', 'main', 'new', 'royal', 'street', 'road', 'avenue', 'lane',
+  'bridge', 'square', 'plaza', 'gate', 'tower', 'wall', 'walls', 'church',
+  'mosque', 'cathedral', 'chapel', 'monastery', 'pagoda', 'statue', 'monument',
+  'theatre', 'theater', 'cinema', 'gallery', 'palace', 'tomb', 'tombs', 'fort',
+  'fortress', 'quarter', 'district', 'shop', 'shops', 'mall', 'store', 'stores',
+  'bar', 'cafe', 'restaurant', 'hotel', 'hostel', 'tour', 'tours', 'walking',
+  'walk', 'class', 'classes', 'cooking', 'show', 'festival', 'club', 'area',
+  'view', 'viewpoint', 'point', 'valley', 'island', 'bay', 'canal', 'pier',
+]);
+
+/**
+ * Does this name pin down a particular place, or merely a kind of place?
+ *
+ * "Old House of Tan Ky" says Tan Ky, and a file that carries that says the same
+ * house wherever it was filed. "Night Market" says nothing: every town on earth
+ * has one, so a filename matching it word for word is not evidence of anything.
+ * The distinction decides how much *independent* proof of location a candidate
+ * has to bring — see searchCommonsPhotos, where getting this wrong handed Hoi
+ * An's Night Market a Hong Kong supermarket.
+ */
+function selfIdentifying(name: string): boolean {
+  return distinctiveTokens(name).some((t) => isUnspaced(t) || !KIND_WORDS.has(t));
+}
+
+/**
  * Scripts that don't separate words with spaces, so a "word" has to be taken as
  * the whole run of characters rather than something split out of it.
  */
@@ -106,7 +153,7 @@ const UNSPACED_SCRIPT = /[㐀-䶿一-鿿぀-ゟ゠-ヿ가-힯]+/g;
  * and Korean-named listings, even where Commons holds a file named for them
  * character-for-character. Runs of those scripts are kept as tokens of their own.
  */
-function foldTokens(s: string, keepParenthetical = false): string[] {
+function foldTokens(s: string, keepParenthetical = false, minLen = 3): string[] {
   const src = keepParenthetical ? s : s.replace(/\([^)]*\)/g, ' ');
   const unspaced = (src.match(UNSPACED_SCRIPT) ?? []).filter((t) => t.length >= 2);
   const latin = src
@@ -116,7 +163,7 @@ function foldTokens(s: string, keepParenthetical = false): string[] {
     .replace(/[^a-z0-9]+/g, ' ')
     .trim()
     .split(' ')
-    .filter((t) => t.length >= 3);
+    .filter((t) => t.length >= minLen);
   return [...unspaced, ...latin];
 }
 
@@ -137,6 +184,41 @@ function hasToken(fileTokens: Set<string>, token: string): boolean {
   if (!isUnspaced(token)) return false;
   for (const f of fileTokens) if (f.includes(token)) return true;
   return false;
+}
+
+/**
+ * Is one token a spelling variant of another? Edit distance 1, and only for
+ * tokens long enough that a single edit cannot turn one real word into an
+ * unrelated one.
+ *
+ * A town is spelled the way the people photographing it spell it, and a guide
+ * is titled in English: Commons files Lisbon under "Lisboa", Cuzco under
+ * "Cusco" and Marrakesh under "Marrakech". Demanding the English form meant the
+ * town test almost never fired in exactly those cities, so the files that DO
+ * name their town were getting no credit for it — twelve correct Lisbon photos
+ * were dropped for want of one letter.
+ */
+function sameToponym(a: string, b: string): boolean {
+  if (a === b) return true;
+  if (a.length < 5 || Math.abs(a.length - b.length) > 1) return false;
+  // Walk both once, allowing a single substitution/insertion/deletion.
+  let i = 0;
+  let j = 0;
+  let edits = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) {
+      i++;
+      j++;
+      continue;
+    }
+    if (++edits > 1) return false;
+    if (a.length === b.length) {
+      i++;
+      j++;
+    } else if (a.length > b.length) i++;
+    else j++;
+  }
+  return edits + (a.length - i) + (b.length - j) <= 1;
 }
 
 /** The tokens of `name` that actually pin down which place it is. */
@@ -301,7 +383,51 @@ async function pool<T>(items: T[], worker: (item: T) => Promise<void>): Promise<
 interface WdInfo {
   images: string[]; // from P18
   category?: string; // Commons category from P373
+  /** Article titles for this entity per Wikipedia edition, from its sitelinks. */
+  sitelinks?: Record<string, string>;
 }
+
+/**
+ * The Wikipedia editions worth asking for a lead image.
+ *
+ * A place's photo does not live in the reader's language, it lives in the
+ * language of the people who go there. A rural Japanese temple or a Vietnamese
+ * pagoda is illustrated on ja.wikipedia or vi.wikipedia while the English
+ * article is a stub or does not exist at all — which is exactly the shape of
+ * the coverage gap: English/Japanese-heavy guides did fine and Vietnam and
+ * Morocco did not.
+ *
+ * The list is every language this app can meet locally (see pipeline/lang.ts)
+ * plus the large, heavily-illustrated editions. Order settles only WHICH photo
+ * leads when several editions have one; every edition here is tried, so
+ * ordering never decides whether a place gets a photo at all.
+ */
+const LEAD_IMAGE_WIKIS = [
+  'en', 'ja', 'de', 'fr', 'es', 'it', 'ru', 'zh', 'pt', 'nl', 'pl', 'sv', 'uk',
+  'ca', 'ar', 'vi', 'id', 'th', 'ko', 'tr', 'fa', 'he', 'hi', 'cs', 'hu', 'ro',
+  'el', 'da', 'fi', 'no', 'ms', 'bn', 'sr', 'bg', 'hr', 'sk', 'sl', 'et', 'lv',
+  'lt', 'ka', 'hy', 'az', 'kk', 'uz', 'ur', 'tl', 'km',
+];
+
+/**
+ * `sitefilter` for wbgetentities — without it the sitelink payload is enormous.
+ *
+ * The parameter takes at most 50 values and rejects the WHOLE call past that,
+ * which is a uniquely expensive way to fail: the request carries the P18 and
+ * P373 claims too, so one over-long list silently costs every Wikidata photo in
+ * the guide rather than merely the sitelinks. Hence both the sliced list and
+ * the claims-only retry in fetchWikidataInfo.
+ */
+const WIKIDATA_SITEFILTER_MAX = 50;
+const LEAD_IMAGE_SITEFILTER = LEAD_IMAGE_WIKIS.slice(0, WIKIDATA_SITEFILTER_MAX)
+  .map((l) => `${l}wiki`)
+  .join('|');
+
+/**
+ * How many editions one entity may be asked for. A place that still has no
+ * photo after this many articles does not have one anywhere.
+ */
+const LEAD_IMAGE_MAX_WIKIS = 8;
 
 /** Wikidata "instance of" values that are definitely not somewhere you can go. */
 const NON_PLACE_INSTANCE = new Set([
@@ -324,11 +450,17 @@ const NON_PLACE_INSTANCE = new Set([
 async function fetchWikidataInfo(ids: string[]): Promise<Record<string, WdInfo>> {
   const out: Record<string, WdInfo> = {};
   for (const group of chunk(ids, 45)) {
-    const url =
+    const base =
       'https://www.wikidata.org/w/api.php?action=wbgetentities&format=json&origin=*' +
-      `&props=claims&ids=${group.join('|')}`;
+      `&ids=${group.join('|')}`;
     try {
-      const data = await getJson(url);
+      // Sitelinks are a bonus; the claims are the thing we cannot do without.
+      // If asking for both is refused for any reason, fall back to claims alone
+      // rather than let the extra source cost us the photos we already had.
+      let data = await getJson(
+        `${base}&props=claims|sitelinks&sitefilter=${LEAD_IMAGE_SITEFILTER}`,
+      );
+      if (data?.error || !data?.entities) data = await getJson(`${base}&props=claims`);
       const entities = data.entities ?? {};
       for (const id of Object.keys(entities)) {
         const claims = entities[id]?.claims ?? {};
@@ -342,7 +474,18 @@ async function fetchWikidataInfo(ids: string[]): Promise<Record<string, WdInfo>>
           .filter((v: unknown): v is string => typeof v === 'string' && !!v)
           .map(commonsThumb);
         const category: string | undefined = claims.P373?.[0]?.mainsnak?.datavalue?.value;
-        out[id] = { images: p18, category: typeof category === 'string' ? category : undefined };
+        const links = entities[id]?.sitelinks ?? {};
+        const sitelinks: Record<string, string> = {};
+        for (const site of Object.keys(links)) {
+          const lang = /^([a-z]{2,3})wiki$/.exec(site)?.[1];
+          const title = links[site]?.title;
+          if (lang && typeof title === 'string' && title) sitelinks[lang] = title;
+        }
+        out[id] = {
+          images: p18,
+          category: typeof category === 'string' ? category : undefined,
+          sitelinks,
+        };
       }
     } catch {
       /* skip this batch on error */
@@ -405,8 +548,23 @@ const MATCH_MAX_KM = 25;
  * Moroccan parliament, and Hanoi's "Lotte Hotel" the shops in the mall below it.
  * A business is named for a brand or a common noun rather than for a building,
  * and no filename test separated the 13 from the 8. So the door stays shut.
+ *
+ * `activities` was re-tried since, and re-measured to the same verdict: 8 of 12
+ * right, 4 wrong, and the 4 fail structurally rather than by bad luck. Half of
+ * what a guide files under "do" is an EVENT, and an event has no photograph of
+ * itself to find — it is a week in a calendar, not a building. Worse, events are
+ * branded with their city, so they match a search for their own name in their
+ * own town perfectly: "Peixe em Lisboa" (a seafood festival) drew an art
+ * installation called "O Peixe", "IndieLisboa" a portrait of a visiting film
+ * director, "Moda Lisboa" the design museum and "Lisboa em Fado" the Fado
+ * museum a kilometre away. Nothing about the filename, the coordinates or the
+ * name separates those from the 8 real venues, so `activities` stays out.
+ *
+ * `shopping` measured differently and is IN: 8 of 9 right. A shop is a fixed
+ * address that people photograph and file under its own name — Hoi An's Central
+ * and Morning markets, Hanoi's Chợ Hôm, Cusco's Mercado San Pedro.
  */
-const PHOTOGRAPHED_CATEGORIES = new Set<CategoryId>(['sights', 'culture', 'nature']);
+const PHOTOGRAPHED_CATEGORIES = new Set<CategoryId>(['sights', 'culture', 'nature', 'shopping']);
 
 /** Distinctive tokens minus the ones that only say which city we are in. */
 function localTokens(name: string, place: string): string[] {
@@ -567,12 +725,26 @@ async function searchCommonsPhotos(
   if (!terms) return [];
 
   // Does the filename itself say which town this is?
-  const placeTokens = distinctiveTokens(placeTerm(place));
+  //
+  // EVERY word of the town's name has to be there, and short words count. Taking
+  // any one word as proof let a Hong Kong supermarket ("HK WC 灣仔道 Wan Chai Road
+  // market shop 海寶食品超級市場 Hoi Bou Food Supermarket night…") vouch for itself
+  // as Hoi An's Night Market on the syllable "Hoi" alone — a whole continent
+  // away, and precisely the failure this check exists to prevent. "Hoi An" only
+  // pins anything down as *both* its words, so "an" must survive folding too.
+  // Spelling is matched loosely (Lisboa/Lisbon), because the point is to
+  // recognise the town, not to insist it be named in English.
+  const placeTokens = foldTokens(placeTerm(place), true, 2).filter((t) => !GENERIC_WORDS.has(t));
   const namesThePlace = (title: string): boolean => {
     if (!placeTokens.length) return false;
-    const fileTokens = new Set(foldTokens(fileStem(title), true));
-    return placeTokens.some((t) => hasToken(fileTokens, t));
+    const fileTokens = new Set(foldTokens(fileStem(title), true, 2));
+    return placeTokens.every(
+      (t) => hasToken(fileTokens, t) || [...fileTokens].some((f) => sameToponym(t, f)),
+    );
   };
+
+  // Does the listing's own name identify a place, or just a kind of place?
+  const selfIdent = selfIdentifying(name);
 
   const out: string[] = [];
   const seen = new Set<string>();
@@ -601,7 +773,21 @@ async function searchCommonsPhotos(
           ? haversineKm(fromLat, fromLon, co.lat, co.lon) <= maxKm
           : null;
       if (near === false) continue; // same name, photographed somewhere else entirely
-      if (!vouched && near !== true && !namesThePlace(title)) continue;
+      // How much location evidence a candidate owes depends on how much its
+      // name already gives. A file is "placed" when it proves its own location:
+      // geotagged at the listing, or naming the town in its filename.
+      //
+      // A self-identifying name doesn't need that — "Old House of Tan Ky",
+      // "Teradaya" and "Togetsukyō Bridge" name one building on earth, and
+      // their photographers never wrote the city, so the located query having
+      // matched them is enough. A name that only says what KIND of place this
+      // is proves nothing by matching, and must be placed: every town has a
+      // night market, which is how Hoi An's got a Hong Kong supermarket and
+      // "Central Market" an Austin one. Being asked about alongside the town
+      // is not evidence; Commons' search is per-term and will happily find
+      // "Hoi" inside "Hoi Bou Food Supermarket".
+      const placed = near === true || namesThePlace(title);
+      if (!placed && !(vouched && selfIdent)) continue;
 
       const photo = usablePhoto(p);
       if (photo) {
@@ -800,6 +986,50 @@ async function geosearchTitle(lat: number, lon: number, lang: string): Promise<G
   return null;
 }
 
+/**
+ * Add the lead image of this entity's article in ANY language edition.
+ *
+ * This is the safest source in the file and, where coverage is worst, the
+ * largest. Every other fuzzy source has to argue that a photo is of the right
+ * place — by name tokens, by coordinates, by both — because it found the photo
+ * by searching for something. This one does not search: a sitelink is part of
+ * the Wikidata item, so `vi.wikipedia.org/wiki/Chùa_Cầu` IS the article about
+ * this exact entity, and its lead image is the photo its own editors chose to
+ * represent it. Identity is guaranteed by construction, not inferred, so no
+ * name or distance test applies or could add anything.
+ *
+ * Cost is bounded by the data rather than by a cap: an edition is only asked
+ * about when some entity that still wants a photo actually has an article
+ * there, so a Kyoto guide quietly costs a `ja` request and a Hanoi guide a `vi`
+ * one, instead of both paying for all sixty. Editions are walked in order and
+ * an entity drops out as soon as it has enough, which is what keeps a
+ * world-famous item from being asked about sixty times.
+ */
+async function fillFromSitelinks(infos: WdInfo[]): Promise<void> {
+  const short = infos.filter((i) => i.sitelinks && i.images.length < TARGET_PER_PLACE);
+  if (!short.length) return;
+
+  const asked = new Map<WdInfo, number>();
+  for (const lang of LEAD_IMAGE_WIKIS) {
+    const batch = short.filter(
+      (i) =>
+        i.images.length < TARGET_PER_PLACE &&
+        (asked.get(i) ?? 0) < LEAD_IMAGE_MAX_WIKIS &&
+        i.sitelinks![lang],
+    );
+    if (!batch.length) continue; // no request at all for an edition nobody is in
+
+    const titles = [...new Set(batch.map((i) => i.sitelinks![lang]))];
+    const found = await fetchWikipediaInfo(titles, lang);
+    for (const i of batch) {
+      asked.set(i, (asked.get(i) ?? 0) + 1);
+      // pageThumb has already refused a logo, a locator map or a coat of arms.
+      const thumb = found[normName(i.sitelinks![lang])]?.thumb;
+      if (thumb) i.images = dedupeImages([...i.images, thumb]);
+    }
+  }
+}
+
 const wdKey = (id: string) => `wd:${RULES}:${id}`;
 
 /**
@@ -822,6 +1052,9 @@ async function resolveWdGalleries(
     const extra = await fetchCommonsCategory(i.category!, MAX_PER_PLACE);
     i.images = dedupeImages([...i.images, ...extra]);
   });
+  // Last, for anything the entity's own claims left short: the photo its
+  // article carries in whatever language happens to have written one.
+  await fillFromSitelinks(uncached.map((id) => info[id]).filter((i): i is WdInfo => !!i));
   for (const id of uncached) {
     const imgs = dedupeImages(info[id]?.images ?? []).slice(0, MAX_PER_PLACE);
     cache[wdKey(id)] = imgs.length ? imgs : null;
