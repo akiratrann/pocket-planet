@@ -39,7 +39,7 @@ const COMMONS_CAP = 80;
  * them — a photo cached when a bare surname was enough to match must not
  * outlive the rule that let it in. Entries from older generations are pruned.
  */
-const RULES = 'v5';
+const RULES = 'v6';
 /** Parallelism for the per-category Commons calls (kept low to avoid throttling). */
 const CONCURRENCY = 4;
 
@@ -178,11 +178,65 @@ function isUnspaced(token: string): boolean {
  * word. An unspaced-script token has no word boundaries to anchor on — Commons
  * files 回顧の滝 both on its own and run together with its neighbours — so for
  * those, occurring inside a token counts as present.
+ *
+ * This is the strict form, used where a match is the *only* evidence of location
+ * (see namesThePlace). Where position has already been established independently,
+ * hasNameToken applies the same test with the two spelling tolerances below.
  */
 function hasToken(fileTokens: Set<string>, token: string): boolean {
   if (fileTokens.has(token)) return true;
   if (!isUnspaced(token)) return false;
   for (const f of fileTokens) if (f.includes(token)) return true;
+  return false;
+}
+
+/** A trailing upload counter, which is not part of anything's name. */
+function trimCounter(token: string): string {
+  return token.replace(/\d+$/, '') || token;
+}
+
+/**
+ * hasToken, plus the two ways a filename spells a name differently from a
+ * guidebook without meaning anything else by it.
+ *
+ * Neither tolerance lets a token match a word it is merely *part of*, which is
+ * the property that keeps this safe: Tsumago-juku's "Wakihonjin Okuya" and the
+ * "Honjin" forty-seven metres away are separate buildings, and "honjin" must go
+ * on failing against a file that says "Wakihonjin" (and vice versa). Both rules
+ * below require the name's letters to be accounted for exactly, whole word for
+ * whole word; only the separators and a trailing count may differ.
+ *
+ *  - A trailing counter. Photographers number their shots, and the number is
+ *    glued to the last word: the only close-up of that wakihonjin on Commons is
+ *    "Wakihonjin OKUYA02.jpg", where "okuya02" is "okuya" and a 2.
+ *  - A seam written out. Romanised Japanese, Vietnamese and Chinese names are
+ *    split wherever the writer felt like it — Commons files the same building as
+ *    "Waki-honjin Okuya of Tsumago-juku", so the guidebook's one word "wakihonjin"
+ *    has to be allowed to meet the file's "waki" and "honjin" back to back. Only
+ *    *adjacent* words may be joined, and they must consume the token exactly, so
+ *    this recognises a different spelling rather than a looser match.
+ *
+ * Takes the tokens in order, because the seam rule is about adjacency.
+ */
+function hasNameToken(fileTokens: readonly string[], token: string): boolean {
+  if (isUnspaced(token)) {
+    for (const f of fileTokens) if (f === token || f.includes(token)) return true;
+    return false;
+  }
+  for (const f of fileTokens) {
+    if (f === token) return true;
+    if (/\d$/.test(f) && trimCounter(f) === token) return true;
+  }
+  for (let i = 0; i < fileTokens.length; i++) {
+    if (isUnspaced(fileTokens[i])) continue;
+    let glued = '';
+    for (let j = i; j < fileTokens.length; j++) {
+      if (isUnspaced(fileTokens[j])) break;
+      glued += trimCounter(fileTokens[j]);
+      if (j > i && glued === token) return true;
+      if (glued.length >= token.length) break;
+    }
+  }
   return false;
 }
 
@@ -234,8 +288,8 @@ function distinctiveTokens(name: string): string[] {
 function titleMatchesName(name: string, title: string): boolean {
   const distinctive = distinctiveTokens(name);
   if (!distinctive.length) return false; // nothing specific to verify against
-  const titleSet = new Set(foldTokens(title));
-  return distinctive.every((t) => hasToken(titleSet, t));
+  const titleTokens = foldTokens(title);
+  return distinctive.every((t) => hasNameToken(titleTokens, t));
 }
 
 /**
@@ -248,8 +302,8 @@ function titleMatchesName(name: string, title: string): boolean {
 function fileMatchesName(name: string, fileTitle: string): boolean {
   const distinctive = distinctiveTokens(name);
   if (!distinctive.length) return false;
-  const fileSet = new Set(foldTokens(fileStem(fileTitle), true));
-  return distinctive.every((t) => hasToken(fileSet, t));
+  const fileTokens = foldTokens(fileStem(fileTitle), true);
+  return distinctive.every((t) => hasNameToken(fileTokens, t));
 }
 
 /** A Commons file title with the namespace and extension stripped. */
@@ -531,6 +585,22 @@ async function fetchCommonsCategory(category: string, limit: number): Promise<st
 const MATCH_MAX_KM = 25;
 
 /**
+ * The same, for an article matched on a single-token name — see the use in
+ * searchWikipediaImage. Generous next to the 25 m that a match made on position
+ * alone gets (GEO_MAX_DIST_M), because a name has agreed as well; tight enough
+ * that a listing cannot collect the photo of the village it stands in.
+ *
+ * Measured over every one-token listing in six rural guides that matches an
+ * article at all (19 of them). The right answers run 0, 0, 0 … 60, 137, 272
+ * ("Kakunodate Castle Ruins" and "Kakunodate Castle" are one castle) and 494 m
+ * ("5 Fingers" and its article), then stop. The wrong ones start at 966 m, where
+ * "Tsumago Castle Ruins" reaches the post town below it. The cut goes in the gap.
+ * Beyond it only one match is lost in all six guides, and that one is a mountain
+ * claiming a prefectural park's article ten kilometres off.
+ */
+const LONE_TOKEN_MAX_KM = 0.7;
+
+/**
  * The categories an encyclopedia actually photographs. Wikipedia and Commons hold
  * monuments, museums, temples and beaches; they hold nothing about a particular
  * tailor's shop or noodle bar. Asking after one of those returns only
@@ -642,8 +712,8 @@ async function geosearchCommonsPhotos(
 
   const out: string[] = [];
   for (const p of pages) {
-    const fileTokens = new Set(foldTokens(fileStem(String(p.title ?? '')), true));
-    if (needed.filter((t) => hasToken(fileTokens, t)).length < required) continue;
+    const fileTokens = foldTokens(fileStem(String(p.title ?? '')), true);
+    if (needed.filter((t) => hasNameToken(fileTokens, t)).length < required) continue;
     const photo = usablePhoto(p);
     if (photo) out.push(photo.url);
     if (out.length >= MAX_PER_PLACE) break;
@@ -906,6 +976,14 @@ async function searchWikipediaImage(
   const fromLat = own ? lat : scope.lat;
   const fromLon = own ? lon : scope.lon;
   const maxKm = own ? MATCH_MAX_KM : scope.radiusKm;
+  // How much of the name there is to match on. A name that survives folding as a
+  // single token is usually a bare toponym — everything else in it was a KIND of
+  // place ("castle", "ruins", "temple") — and a bare toponym is equally the name
+  // of the locality the listing sits in. That is a real confusion, not a
+  // hypothetical: "Tsumago Castle Ruins" reduces to "tsumago" and matched the
+  // article "Tsumago-juku", the post town below the hill, whose photo shows a
+  // street of houses and not the castle site at all.
+  const loneToken = distinctiveTokens(name).length < 2;
   for (const p of pages) {
     if (!titleMatchesName(name, p.title ?? '')) continue;
     const co = p.coordinates?.[0];
@@ -920,6 +998,13 @@ async function searchWikipediaImage(
         ? haversineKm(fromLat, fromLon, co.lat, co.lon)
         : null;
     if (near != null && near > maxKm) continue; // same name, wrong place
+    // A one-token name is thin evidence, so it has to be spent on the same spot
+    // rather than merely the same district. Where the article really is the
+    // listing the two coordinates describe one object and agree to within metres
+    // — "Kiyomizu Temple" and "Kiyomizu-dera", "Magome" and "Magome-juku" — so
+    // this costs those nothing, while the post town a kilometre from the castle
+    // ruins is refused. Names with more to say keep the full tolerance.
+    if (loneToken && own && near != null && near > LONE_TOKEN_MAX_KM) continue;
 
     const thumb = pageThumb(p.thumbnail?.source);
     const qid: string | undefined = p.pageprops?.wikibase_item;
