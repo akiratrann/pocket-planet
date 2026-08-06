@@ -74,6 +74,106 @@ function asSaved(raw: unknown): SavedLike | null {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Where to go next: destination suggestions for an empty search box.
+//
+// Same rule as the rest of this file, and it is the whole point of the feature:
+// a suggestion is only offered when the ACCOUNT ITSELF is the reason for it.
+// The two things that qualify are the places the reader saved (each one records
+// the guide it came from) and the destination they pointed a trip at. Both are
+// facts the reader can check against their own pins and trips.
+//
+// What is deliberately NOT here: anything popular, trending, sponsored, or
+// inferred. If this returns nothing, the UI shows its plain starter chips and
+// says nothing about the reader — a popular city dressed up as "recommended for
+// you" would be a lie, and one the reader has no way to catch.
+// ---------------------------------------------------------------------------
+
+/** Why one destination is being offered. Always a fact about the reader. */
+export type DestinationBasis =
+  /** They saved `places` places whose guide was this destination. */
+  | { kind: 'saved'; places: number }
+  /** They pointed the trip `trip` at it, and it holds `places` stops. */
+  | { kind: 'trip'; trip: string; places: number };
+
+export interface DestinationSuggestion {
+  /** Exactly the guide name to search for. */
+  name: string;
+  because: DestinationBasis;
+}
+
+export interface PersonalDestinations {
+  /** Display name of the signed-in account this was computed for. */
+  name: string;
+  /** Distinct places saved across the account (pins + itinerary stops). */
+  savedTotal: number;
+  /** Empty when the account has saved nothing yet — the honest "no signal". */
+  suggestions: DestinationSuggestion[];
+}
+
+/** How many destinations the search box will offer. */
+const MAX_DESTINATIONS = 6;
+
+/**
+ * Destinations to offer this account when the search box is focused and empty.
+ *
+ * A trip beats a pin count as the reason, because it is the stronger statement
+ * of intent: someone who named a trip "Kyoto" is planning Kyoto, whatever their
+ * pin count says. Otherwise the count of saved places is the reason, and the
+ * number shown is the real one.
+ */
+export function suggestDestinations(user: User): PersonalDestinations {
+  const saved = savedPlaces(user);
+
+  // Count saved places per destination. `location` is the guide the place was
+  // saved from; a place saved before that field existed simply has no vote.
+  const savedPer = new Map<string, { name: string; places: number }>();
+  for (const s of saved) {
+    const loc = s.location?.trim();
+    if (!loc) continue;
+    const key = normalize(loc);
+    const cur = savedPer.get(key);
+    if (cur) cur.places++;
+    else savedPer.set(key, { name: loc, places: 1 });
+  }
+
+  // Destinations the reader pointed a trip at, with that trip's stop count.
+  const trips = new Map<string, { name: string; trip: string; places: number }>();
+  for (const raw of user.data?.itineraries ?? []) {
+    const it = raw as { destination?: unknown; name?: unknown; places?: unknown };
+    const dest = typeof it.destination === 'string' ? it.destination.trim() : '';
+    if (!dest) continue;
+    const key = normalize(dest);
+    const places = Array.isArray(it.places) ? it.places.length : 0;
+    const trip = typeof it.name === 'string' && it.name.trim() ? it.name.trim() : dest;
+    const cur = trips.get(key);
+    // One destination, several trips: name the fullest one, so the reason the
+    // reader is shown is the trip they have actually been working on.
+    if (!cur || places > cur.places) trips.set(key, { name: dest, trip, places });
+  }
+
+  const out: DestinationSuggestion[] = [];
+  const taken = new Set<string>();
+
+  // Trips first — a named trip is the clearest statement of where they're going.
+  for (const [key, t] of [...trips.entries()].sort((a, b) => b[1].places - a[1].places)) {
+    taken.add(key);
+    out.push({ name: t.name, because: { kind: 'trip', trip: t.trip, places: t.places } });
+  }
+  for (const [key, s] of [...savedPer.entries()].sort(
+    (a, b) => b[1].places - a[1].places || a[1].name.localeCompare(b[1].name),
+  )) {
+    if (taken.has(key)) continue;
+    out.push({ name: s.name, because: { kind: 'saved', places: s.places } });
+  }
+
+  return {
+    name: user.name,
+    savedTotal: saved.length,
+    suggestions: out.slice(0, MAX_DESTINATIONS),
+  };
+}
+
 /**
  * Every place the account has saved, de-duplicated by id.
  *

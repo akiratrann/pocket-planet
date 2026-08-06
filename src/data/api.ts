@@ -186,6 +186,43 @@ export async function fetchPersonal(
   }
 }
 
+// --- Destination suggestions (the search box's empty state) -----------------
+
+/**
+ * Why a destination is being offered. There are exactly two answers, and both
+ * are facts about the reader's own account that they can check. There is no
+ * "because it's popular" case on purpose: popularity is not personalization,
+ * and the UI must never dress it up as one.
+ */
+export type DestinationBasis =
+  | { kind: 'saved'; places: number }
+  | { kind: 'trip'; trip: string; places: number };
+
+export interface DestinationSuggestion {
+  name: string;
+  because: DestinationBasis;
+}
+
+export interface PersonalDestinations {
+  name: string;
+  savedTotal: number;
+  suggestions: DestinationSuggestion[];
+}
+
+/**
+ * Destinations drawn from the signed-in account's own pins and trips. Null when
+ * signed out or the backend is unreachable — the caller then shows its plain
+ * starter list and says nothing about the reader.
+ */
+export async function fetchPersonalDestinations(): Promise<PersonalDestinations | null> {
+  if (!authToken) return null;
+  try {
+    return await apiFetch<PersonalDestinations>(`/personal/destinations`);
+  } catch {
+    return null;
+  }
+}
+
 export interface FeedbackInput {
   location: string;
   name?: string;

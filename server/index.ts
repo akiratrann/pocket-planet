@@ -5,7 +5,7 @@
 
 // Must stay first: applies .env before any other module reads process.env.
 import './load-env.ts';
-import { installUpstreamFetch } from './upstream.ts';
+import { installUpstreamFetch, upstreamStats } from './upstream.ts';
 
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -20,7 +20,7 @@ import compress from '@fastify/compress';
 import rateLimit from '@fastify/rate-limit';
 import cron from 'node-cron';
 import { assembleGuide } from './assemble.ts';
-import { personalizeGuide } from './personalize.ts';
+import { personalizeGuide, suggestDestinations } from './personalize.ts';
 import { store } from './store.ts';
 import { applyFeedback, type Feedback, type FeedbackKind } from '../src/core/learning.ts';
 import { ingestUrl, ingestLocationAuto, ingestAllTracked } from './pipeline/ingest.ts';
@@ -114,11 +114,26 @@ app.get<{ Querystring: { q?: string; lang?: string } }>('/api/guide', async (req
   if (!q) return reply.code(400).send({ error: 'Missing query parameter q' });
   // Accept only a simple language code (e.g. "en", "ja", "pt").
   const lang = /^[a-z]{2,3}$/.test(req.query.lang ?? '') ? req.query.lang! : 'en';
+  // Snapshot the upstream counters around the build so a cold guide can report
+  // what it actually cost Wikimedia, rather than leaving the 429 rate a matter
+  // of opinion. Cheap enough to leave on permanently.
+  const before = { ...upstreamStats };
+  const startedAt = Date.now();
   try {
     const { value, status, ageMs } = await cachedGuide(
       `${q.toLowerCase()}::${lang}`,
       () => assembleGuide(q, lang),
     );
+    if (status === 'miss') {
+      console.warn(
+        `[wikimedia] cold build "${q}" in ${((Date.now() - startedAt) / 1000).toFixed(1)}s — ` +
+          `requests=${upstreamStats.requests - before.requests} ` +
+          `429=${upstreamStats.throttled - before.throttled} ` +
+          `5xx=${upstreamStats.serverErrors - before.serverErrors} ` +
+          `escaped=${upstreamStats.escaped - before.escaped} ` +
+          `waited=${((upstreamStats.waitedMs - before.waitedMs) / 1000).toFixed(1)}s`,
+      );
+    }
     // Let the browser reuse it too, and allow serving stale while revalidating.
     reply.header('Cache-Control', 'public, max-age=300, stale-while-revalidate=86400');
     reply.header('X-Guide-Cache', status);
@@ -214,6 +229,20 @@ app.get<{ Querystring: { q?: string; lang?: string } }>('/api/personal', async (
     req.log.error(err);
     return reply.code(502).send({ error: (err as Error).message });
   }
+});
+
+// Where this account might want to go next, for the search box's empty state.
+// Requires an account for the same reason /api/personal does: with no saved
+// places there is nothing to suggest FROM, and the honest answer is an empty
+// list — which is what a signed-out caller gets by being refused here, leaving
+// the UI to show its plain starter chips with no claim attached to them.
+//
+// Guide-free and store-only, so it costs one file read and can be called on
+// every focus of the search box.
+app.get('/api/personal/destinations', async (req, reply) => {
+  const user = await requireUser(req, reply);
+  if (!user) return reply;
+  return suggestDestinations(user);
 });
 
 // --- SSRF hardening for /api/ingest ----------------------------------------

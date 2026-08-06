@@ -1,9 +1,22 @@
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import {
+  Fragment,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useAppStore } from '../store/useAppStore';
 import { useI18n } from '../i18n';
 import { suggestPlaces, type PlaceSuggestion } from '../data/geocode';
+import { fetchPersonalDestinations, type DestinationBasis } from '../data/api';
 import './searchbar-typeahead.css';
 
+// Starter destinations. Hardcoded, generic, and the same for everybody — which
+// is exactly why nothing in this file may describe them as chosen for the
+// reader. They are what we show when we know nothing.
 const EXAMPLES = ['Kyoto', 'Portugal', 'Cusco', 'Marrakesh', 'Queenstown', 'Hoi An'];
 
 // The typeahead's own labels live here rather than in i18n.ts: that file is
@@ -15,6 +28,9 @@ const LABELS: Record<string, string> = {
   search_popular: 'Popular destinations',
   search_searching: 'Looking for places…',
   search_no_matches: 'No destinations match',
+  // Deliberately says where the rows came FROM rather than claiming they were
+  // chosen for the reader — the rows underneath carry the actual evidence.
+  search_from_saved: 'From places you saved',
 };
 
 // Long enough that a normal typist finishes a word first (a 10-char query costs
@@ -43,21 +59,71 @@ function iconFor(kind: string): string {
   return KIND_ICON[kind] ?? '📍';
 }
 
+/**
+ * One row of the dropdown.
+ *
+ * `why` is the load-bearing field, and it is the reason this type exists rather
+ * than reusing PlaceSuggestion: a row may only carry a reason when the reason is
+ * a fact about the reader's own account. A popular row has no `why` and gets no
+ * sentence invented for it — "recommended for you" over a city we picked because
+ * it is famous would be a claim the reader cannot check and we cannot support.
+ */
+interface Row {
+  id: string;
+  name: string;
+  icon: string;
+  /** Secondary line: the geographic context of a search hit. */
+  context: string;
+  /** Right-hand pill (OSM feature type), search results only. */
+  kindLabel?: string;
+  /** Evidence from the reader's own saves. Personal rows only. */
+  why?: string;
+  group: 'personal' | 'popular' | 'result';
+}
+
+function rowFromSuggestion(s: PlaceSuggestion): Row {
+  return {
+    id: s.id,
+    name: s.name,
+    icon: iconFor(s.kind),
+    context: s.context,
+    kindLabel: s.kind,
+    group: 'result',
+  };
+}
+
 /** Fallback rows for an empty query — the same starter destinations as the chips. */
-function popularSuggestions(): PlaceSuggestion[] {
+function popularRows(): Row[] {
   return EXAMPLES.map((name) => ({
     id: `popular:${name}`,
     name,
+    icon: '📍',
     context: '',
-    kind: 'popular',
-    lat: 0,
-    lon: 0,
+    group: 'popular' as const,
   }));
+}
+
+/**
+ * Turn the server's evidence into the sentence shown under a destination.
+ *
+ * Every branch names a number the reader can go and count. There is no default
+ * case and no "you might like…" — `DestinationBasis` has exactly the two shapes
+ * the backend can prove, and if it ever gains a third this must gain a branch
+ * rather than quietly falling back to something vague.
+ */
+function reasonFor(name: string, because: DestinationBasis): string {
+  if (because.kind === 'trip') {
+    return because.places > 0
+      ? `${because.places} ${because.places === 1 ? 'stop' : 'stops'} in your trip “${because.trip}”`
+      : `Your trip “${because.trip}”`;
+  }
+  return `${because.places} ${because.places === 1 ? 'place' : 'places'} you saved in ${name}`;
 }
 
 export default function SearchBar({ isLoading }: { isLoading: boolean }) {
   const query = useAppStore((s) => s.query);
   const setQuery = useAppStore((s) => s.setQuery);
+  const authUser = useAppStore((s) => s.authUser);
   const { t, lang } = useI18n();
   /** t() for the typeahead's labels, with a built-in English fallback. */
   const tx = (key: keyof typeof LABELS) => {
@@ -86,12 +152,43 @@ export default function SearchBar({ isLoading }: { isLoading: boolean }) {
   }, [query]);
 
   const trimmed = text.trim();
-  const popular = useMemo(popularSuggestions, []);
   // Only an *empty* box falls back to the starter destinations. Showing
   // "Popular destinations" after one character reads as an answer to what was
   // typed, when it is really just the chip row repeated.
-  const showPopular = trimmed.length === 0;
-  const list = showPopular ? popular : items;
+  const boxEmpty = trimmed.length === 0;
+
+  // Destinations drawn from this account's own pins and trips. Signed out, the
+  // query never runs and `personal` stays undefined, so the empty box shows the
+  // plain starter list — no teaser, no locked row, and above all no generic city
+  // relabelled as a personal recommendation.
+  const { data: personal } = useQuery({
+    // Keyed by account: signing out and in as someone else must not leave the
+    // previous person's destinations in the box.
+    queryKey: ['personal-destinations', authUser?.id ?? null],
+    queryFn: fetchPersonalDestinations,
+    enabled: !!authUser,
+    staleTime: 60_000,
+  });
+
+  const rows = useMemo<Row[]>(() => {
+    if (!boxEmpty) return items.map(rowFromSuggestion);
+    const mine: Row[] = (personal?.suggestions ?? []).map((s) => ({
+      id: `personal:${s.name}`,
+      name: s.name,
+      icon: s.because.kind === 'trip' ? '🧳' : '📌',
+      context: '',
+      why: reasonFor(s.name, s.because),
+      group: 'personal' as const,
+    }));
+    // Top up with the generic list, minus anything already offered above, so a
+    // reader with two saved cities still gets a full panel — and the two groups
+    // stay visibly separate, because only one of them is about them.
+    const taken = new Set(mine.map((r) => r.name.trim().toLowerCase()));
+    const rest = popularRows().filter((r) => !taken.has(r.name.trim().toLowerCase()));
+    return [...mine, ...rest];
+  }, [boxEmpty, items, personal]);
+
+  const list = rows;
 
   // One debounced, cancellable lookup per settled query. The cleanup both clears
   // the pending timer and aborts the in-flight request, so a fast typist never
@@ -146,7 +243,7 @@ export default function SearchBar({ isLoading }: { isLoading: boolean }) {
     if (v) setQuery(v);
   };
 
-  const choose = (s: PlaceSuggestion) => {
+  const choose = (s: Row) => {
     setOpen(false);
     setActive(-1);
     setText(s.name);
@@ -203,7 +300,7 @@ export default function SearchBar({ isLoading }: { isLoading: boolean }) {
   // nothing honest to show for it — leave the panel shut rather than flash an
   // empty box between "" and the first real lookup.
   const panelOpen =
-    open && (showPopular ? list.length > 0 : trimmed.length >= MIN_QUERY);
+    open && (boxEmpty ? list.length > 0 : trimmed.length >= MIN_QUERY);
   // Guard against a stale index outliving the list it pointed into.
   const activeId =
     panelOpen && active >= 0 && active < list.length
@@ -277,44 +374,60 @@ export default function SearchBar({ isLoading }: { isLoading: boolean }) {
             aria-label={tx('search_suggestions')}
             aria-busy={busy}
           >
-            {/* Results for the previous keystroke stay on screen while the next
-                lookup runs (blanking the list on every letter is worse), so the
-                header carries the "still working" signal instead. */}
-            <li className="sb-typeahead__head" aria-hidden="true">
-              {showPopular ? tx('search_popular') : tx('search_suggestions')}
-              {busy && <span className="sb-typeahead__spinner" />}
-            </li>
             {list.map((s, i) => (
-              <li key={s.id} role="presentation">
-                <button
-                  type="button"
-                  id={`${listId}-opt-${i}`}
-                  role="option"
-                  aria-selected={i === active}
-                  className={
-                    'sb-typeahead__option' +
-                    (i === active ? ' sb-typeahead__option--active' : '')
-                  }
-                  // Keep focus in the input so the click doesn't close the panel
-                  // via blur before the selection is handled.
-                  onMouseDown={(e) => e.preventDefault()}
-                  onMouseEnter={() => setActive(i)}
-                  onClick={() => choose(s)}
-                >
-                  <span className="sb-typeahead__icon" aria-hidden="true">
-                    {iconFor(s.kind)}
-                  </span>
-                  <span className="sb-typeahead__text">
-                    <span className="sb-typeahead__name">{s.name}</span>
-                    {s.context && (
-                      <span className="sb-typeahead__context">{s.context}</span>
-                    )}
-                  </span>
-                  {!showPopular && <span className="sb-typeahead__kind">{s.kind}</span>}
-                </button>
-              </li>
+              <Fragment key={s.id}>
+                {/* A header per group, emitted at the boundary. The two empty-box
+                    groups must never merge under one heading: "From places you
+                    saved" is a claim about the reader, and it has to stop
+                    exactly where the evidence does. Results for the previous
+                    keystroke stay on screen while the next lookup runs (blanking
+                    the list on every letter is worse), so the header carries the
+                    "still working" signal instead. */}
+                {s.group !== list[i - 1]?.group && (
+                  <li className="sb-typeahead__head" aria-hidden="true">
+                    {s.group === 'personal'
+                      ? tx('search_from_saved')
+                      : s.group === 'popular'
+                        ? tx('search_popular')
+                        : tx('search_suggestions')}
+                    {busy && s.group === 'result' && <span className="sb-typeahead__spinner" />}
+                  </li>
+                )}
+                <li role="presentation">
+                  <button
+                    type="button"
+                    id={`${listId}-opt-${i}`}
+                    role="option"
+                    aria-selected={i === active}
+                    className={
+                      'sb-typeahead__option' +
+                      (i === active ? ' sb-typeahead__option--active' : '')
+                    }
+                    // Keep focus in the input so the click doesn't close the panel
+                    // via blur before the selection is handled.
+                    onMouseDown={(e) => e.preventDefault()}
+                    onMouseEnter={() => setActive(i)}
+                    onClick={() => choose(s)}
+                  >
+                    <span className="sb-typeahead__icon" aria-hidden="true">
+                      {s.icon}
+                    </span>
+                    <span className="sb-typeahead__text">
+                      <span className="sb-typeahead__name">{s.name}</span>
+                      {s.context && (
+                        <span className="sb-typeahead__context">{s.context}</span>
+                      )}
+                      {/* The reason is a fact about the reader's own saves, not a
+                          claim about the place, and it sits next to the name so
+                          the two are read together. */}
+                      {s.why && <span className="sb-typeahead__why">{s.why}</span>}
+                    </span>
+                    {s.kindLabel && <span className="sb-typeahead__kind">{s.kindLabel}</span>}
+                  </button>
+                </li>
+              </Fragment>
             ))}
-            {!showPopular && !list.length && (
+            {!boxEmpty && !list.length && (
               <li className="sb-typeahead__note">
                 {busy
                   ? tx('search_searching')
@@ -325,7 +438,7 @@ export default function SearchBar({ isLoading }: { isLoading: boolean }) {
         )}
 
         <p className="sb-typeahead__sr" role="status" aria-live="polite">
-          {panelOpen && !showPopular && !busy
+          {panelOpen && !boxEmpty && !busy
             ? `${list.length} ${tx('search_suggestions')}`
             : ''}
         </p>
