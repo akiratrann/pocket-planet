@@ -190,10 +190,17 @@
   line-height: 1;
   flex: 0 0 auto;
 }
+/* The selected chip's tick box, drawn in the chip's OWN ink rather than in
+   hard-coded white. The white was written when a selected chip was filled with
+   its category colour; the chip is now filled with `--ink`, and `--ink` is
+   near-white in dark mode — so a white box on a white fill vanished, leaving
+   dark mode with a bare floating checkmark and no box at all. `currentColor` is
+   `--surface-0` on a selected chip in both themes, which is by construction the
+   colour that contrasts with the fill. */
 .chip--on .chip__box {
   opacity: 1;
-  background: rgba(255, 255, 255, 0.28);
-  border-color: rgba(255, 255, 255, 0.9);
+  background: color-mix(in srgb, currentColor 28%, transparent);
+  border-color: currentColor;
 }
 /* The native checkbox is visually hidden, so focus has to be drawn somewhere
    else. It goes around the WHOLE chip, not around the 15px box inside it: the
@@ -3207,9 +3214,16 @@ a.opinions__src:hover {
   background: var(--ink-body);
   border-color: var(--ink-body);
 }
+/* The count is real data — how many places a filter would leave — so it is body
+   text and has to clear 4.5:1, not decoration. Held back by opacity rather than
+   by a fixed colour because the chip's ink flips between the rest and selected
+   states; 0.6 measured 3.55:1 on an unselected chip in light mode (its worst
+   case of four). 0.75 is the lowest step that clears AA in all four
+   state/theme combinations: measured 5.43 / 10.05 light (rest / selected) and
+   7.63 / 7.40 dark. */
 .chip__count {
   font-variant-numeric: tabular-nums;
-  opacity: 0.6;
+  opacity: 0.75;
   font-weight: 600;
 }
 /* ---------- Section heading ----------
@@ -3319,10 +3333,21 @@ a.opinions__src:hover {
 /* A reserved right-hand gutter on the text rows only. The score badge sits at
    the top of that column and the save button at the bottom of it, vertically
    aligned; the title keeps the full width because nothing overlaps it. Without
-   this the save button lands on the last line of the description. */
+   this the save button lands on the last line of the description.
+
+   40px, not 32px, because the gutter has to clear the save button's HIT AREA
+   and not just its 28px glyph. The button is inset 10px from the card's content
+   edge and grows its target by 8px on every side (see `.dcard__pin::before`),
+   so its pointer box starts 46px in; a 32px gutter left the last 4-8px of every
+   wrapped description and meta line inside it. Measured on a Hoi An guide:
+   25 of 73 cards at a 400px panel and 54 of 73 at 270px had text under the
+   button's target, so a click aimed at the card's text saved the place instead
+   of opening it. Nothing ever overlapped VISIBLY — this was invisible, which is
+   what made it worth measuring rather than looking for. The description is
+   line-clamped, so the 8px costs at most a word. */
 .dcard__desc,
 .dcard__meta {
-  padding-right: 32px;
+  padding-right: 40px;
 }
 .dcard__meta {
   gap: var(--s-8);
@@ -3491,11 +3516,32 @@ a.opinions__src:hover {
   inset: -8px;
 }
 /* On the headline card it moves onto the image instead, so it never sits over
-   the description. Translucent dark so it reads on any photo. */
+   the description. */
 .dcard-wrap:has(.dcard--hero) .dcard__pin {
   top: calc(var(--s-10) + var(--s-6));
   right: calc(var(--s-10) + var(--s-6));
   bottom: auto;
+}
+/* The translucent dark scrim is for sitting ON A PHOTO, and it is applied only
+   when there is one. Roughly half of every guide is photo-less and always will
+   be, so the empty tile is not an edge case — and the scrim was wrong on it in
+   BOTH themes. Measured against the empty tile: 4.0:1 in light, where a black
+   disc is the single darkest mark on an otherwise pale, deliberately quiet band
+   and reads as an error badge stuck to a blank rectangle; and 1.1:1 in dark,
+   with a transparent border, where the button simply is not there — an
+   interactive control below the 3:1 that WCAG 1.4.11 asks of one.
+
+   With no photo the pin falls back to the base `.dcard__pin` treatment above,
+   which is what every standard row already uses. The rule is then legible as
+   "dark on a photo, surface off it" rather than as two arbitrary pin styles.
+
+   Single-level `:has()` on purpose: `:has()` may not be nested inside `:has()`,
+   so this cannot be written as `:has(.dcard--hero .pphoto--card:not(:has(img)))`.
+   Keying off the PRESENCE of the img is also the more robust direction — the
+   element exists from first paint while the photo is still loading, so the pin
+   never flips styles mid-load, and if the photo errors PlacePhoto drops the
+   <img> and the pin correctly reverts. */
+.dcard-wrap:has(.dcard--hero .pphoto__img) .dcard__pin {
   background: rgb(0 0 0 / 0.5);
   border-color: transparent;
   backdrop-filter: blur(4px);
@@ -3594,4 +3640,23 @@ a.opinions__src:hover {
 }
 .panel__scroll {
   container-type: inline-size;
+}
+
+/* Keep the sticky filter bar from eating the card the keyboard just reached.
+   Tabbing FORWARDS is fine — the browser reveals each card at the bottom of the
+   scrollport — but shift-tabbing BACKWARDS reveals it at the top, which is
+   exactly where the sticky header is pinned. Measured at every panel width
+   tested (270px, 390px, 400px): 70px of the focused card, its whole top edge
+   and the top of its focus ring included, sat behind the header. On a standard
+   row that is the thumbnail, the rank chip and most of the title.
+
+   `scroll-padding-top` is the fix rather than a scroll offset in script,
+   because it applies to every scroll the browser performs into this scroller —
+   focus, fragment links and `scrollIntoView` alike. The header measures 66px
+   (a ~42px chip rail plus its 12/10 padding and hairline) and is that height at
+   any width, since the rail never wraps; 74px clears it plus the 4px the 2px
+   ring at 2px offset needs. Scoped with `:has()` so the other panel tabs, which
+   render no sticky header, do not get a dead 74px of slack. */
+.panel__scroll:has(.panel__sticky) {
+  scroll-padding-top: 74px;
 }
